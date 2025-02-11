@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "*"
+    branches:
+      - next
 
 jobs:
   goreleaser:
@@ -39,7 +41,7 @@ jobs:
       - name: Build Go Binary
         working-directory: ./
         env:
-          PATH: ${{ env.PATH }}:${{ env.GITHUB_WORKSPACE }}/go_win7
+          PATH: ${{ env.PATH }}:${{ github.workspace }}/go_win7
         run: make
 
       - name: Draft Release
