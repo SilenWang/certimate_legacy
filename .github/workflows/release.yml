@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 20.11.0
 
+      - name: Install make
+        run: sudo apt-get update && sudo apt-get install -y make
+
       # - name: Set up Go
       #   uses: actions/setup-go@v5
       #   with:
@@ -40,9 +43,9 @@ jobs:
 
       - name: Build Go Binary
         working-directory: ./
-        env:
-          PATH: ${{ env.PATH }}:${{ github.workspace }}/go_win7
-        run: make
+        run: |
+          echo "${{ github.workspace }}/go_win7" >> $GITHUB_PATH
+          make
 
       - name: Draft Release
         uses: ncipollo/release-action@v1.15.0
