@@ -19,19 +19,37 @@ jobs:
         with:
           node-version: 20.11.0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ">=1.22.5"
+      # - name: Set up Go
+      #   uses: actions/setup-go@v5
+      #   with:
+      #     go-version: ">=1.22.5"
 
       - name: Build Admin dashboard UI
         run: npm --prefix=./ui ci && npm --prefix=./ui run build
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+      
+      - name: Download latest release from go-win7
+        uses: robinraju/release-downloader@v1.11
         with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+          repository: 'XTLS/go-win7'
+          latest: true
+          fileName: '*linux-amd64.zip'
+          out-file-path: 'go_win7'
+          extract: true
+
+      - name: Build Go Binary
+        working-directory: ./
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PATH: ${{ env.PATH }}:${{ env.GITHUB_WORKSPACE }}/go_win7
+        run: make
+
+      - name: Draft Release
+        uses: ncipollo/release-action@v1.15.0
+        with:
+          draft: false
+          allowUpdates: true
+          generateReleaseNotes: true  #自动生成发行说明。
+          tag: "${{ github.ref_name }}"
+          owner: "SilenWang"
+          repo: "certimate_win7"
+          artifacts: '${{ github.workspace }}/*'
+          token: ${{ secrets.MY_PERSON_TOKEN  }}

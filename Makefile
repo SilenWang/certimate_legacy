@@ -5,10 +5,6 @@ BUILD_DIR=build
 
 # 支持的操作系统和架构列表
 OS_ARCH=\
-    linux/amd64 \
-    linux/arm64 \
-    darwin/amd64 \
-    darwin/arm64 \
     windows/amd64 \
     windows/arm64
 
