@@ -2,10 +2,8 @@ name: basebuild
 
 on:
   push:
-    tags:
-      - "*"
     paths:
-      - '.github/workflows/**'
+      - '.github/workflows/*'
 
 jobs:
   goreleaser:
