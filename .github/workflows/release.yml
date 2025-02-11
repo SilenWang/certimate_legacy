@@ -4,8 +4,8 @@ on:
   push:
     tags:
       - "*"
-    branches:
-      - next
+    paths:
+      - '.github/workflows/**'
 
 jobs:
   goreleaser:
