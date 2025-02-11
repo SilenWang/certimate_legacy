@@ -50,3 +50,4 @@ jobs:
           owner: "SilenWang"
           repo: "certimate_win7"
           artifacts: '${{ github.workspace }}/build/*'
+          name: ${{ github.sha }}
