@@ -1,17 +1,3 @@
-<h1 align="center">🔒 Certimate</h1>
-
-<div align="center">
-
-[![Stars](https://img.shields.io/github/stars/usual2970/certimate?style=flat)](https://github.com/usual2970/certimate)
-[![Forks](https://img.shields.io/github/forks/usual2970/certimate?style=flat)](https://github.com/usual2970/certimate)
-[![Docker Pulls](https://img.shields.io/docker/pulls/usual2970/certimate?style=flat)](https://hub.docker.com/r/usual2970/certimate)
-[![Release](https://img.shields.io/github/v/release/usual2970/certimate?sort=semver)](https://github.com/usual2970/certimate/releases)
-[![License](https://img.shields.io/github/license/usual2970/certimate)](https://mit-license.org/)
-
-</div>
-
-<div align="center">
-
 中文 ｜ [English](README_EN.md)
 
 > [!WARNING]
