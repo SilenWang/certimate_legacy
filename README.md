@@ -1,9 +1,10 @@
-中文 ｜ [English](README_EN.md)
+中文(README.md) ｜ [English](README_EN.md)
 
 > [!WARNING]
 > 本项目仅编译Certimate的Win7兼容版本，并未执行任何单元测试，不保证所有原版功能均可用
+> Fork的方式不能很好完成项目设立支出的追踪源项目自动发布的目的，因此放弃本项目，开设单独的项目[专门维护一个workflow](https://github.com/SilenWang/certimate_win7)
 
-# Certimate-Win7
+# Certimate-Legacy
 
 本项目是[Certimate](https://github.com/usual2970/certimate)工具的fork。
 

@@ -2,8 +2,9 @@
 
 > [!WARNING]
 > This project only compiles the Win7-compatible version of Certimate and has not performed any unit-tests. It does not guarantee that all original features are available.
+> The Fork method cannot effectively achieve the goal of automatically tracking the source project and automatically publishing the project's established expenditures. Therefore, we have decided to abandon this project and start a separate dedicated project to [maintain a workflow.](https://github.com/SilenWang/certimate_win7)
 
-# Certimate-Win7
+# Certimate-Legacy
 
 This project is a fork of the [Certimate](https://github.com/usual2970/certimate)tool.
 
