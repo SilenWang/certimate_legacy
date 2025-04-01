@@ -4,20 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	aliyunOpen "github.com/alibabacloud-go/darabonba-openapi/v2/client"
-	aliyunNlb "github.com/alibabacloud-go/nlb-20220430/v2/client"
+	aliopen "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	alinlb "github.com/alibabacloud-go/nlb-20220430/v2/client"
 	"github.com/alibabacloud-go/tea/tea"
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	uploaderp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/aliyun-cas"
+	uploadersp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/aliyun-cas"
 )
 
-type AliyunNLBDeployerConfig struct {
+type DeployerConfig struct {
 	// 阿里云 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 阿里云 AccessKeySecret。
@@ -25,35 +25,27 @@ type AliyunNLBDeployerConfig struct {
 	// 阿里云地域。
 	Region string `json:"region"`
 	// 部署资源类型。
-	ResourceType DeployResourceType `json:"resourceType"`
+	ResourceType ResourceType `json:"resourceType"`
 	// 负载均衡实例 ID。
-	// 部署资源类型为 [DEPLOY_RESOURCE_LOADBALANCER] 时必填。
+	// 部署资源类型为 [RESOURCE_TYPE_LOADBALANCER] 时必填。
 	LoadbalancerId string `json:"loadbalancerId,omitempty"`
 	// 负载均衡监听 ID。
-	// 部署资源类型为 [DEPLOY_RESOURCE_LISTENER] 时必填。
+	// 部署资源类型为 [RESOURCE_TYPE_LISTENER] 时必填。
 	ListenerId string `json:"listenerId,omitempty"`
 }
 
-type AliyunNLBDeployer struct {
-	config      *AliyunNLBDeployerConfig
-	logger      logger.Logger
-	sdkClient   *aliyunNlb.Client
+type DeployerProvider struct {
+	config      *DeployerConfig
+	logger      *slog.Logger
+	sdkClient   *alinlb.Client
 	sslUploader uploader.Uploader
 }
 
-var _ deployer.Deployer = (*AliyunNLBDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *AliyunNLBDeployerConfig) (*AliyunNLBDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *AliyunNLBDeployerConfig, logger logger.Logger) (*AliyunNLBDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.AccessKeyId, config.AccessKeySecret, config.Region)
@@ -66,31 +58,41 @@ func NewWithLogger(config *AliyunNLBDeployerConfig, logger logger.Logger) (*Aliy
 		return nil, xerrors.Wrap(err, "failed to create ssl uploader")
 	}
 
-	return &AliyunNLBDeployer{
-		logger:      logger,
+	return &DeployerProvider{
 		config:      config,
+		logger:      slog.Default(),
 		sdkClient:   client,
 		sslUploader: uploader,
 	}, nil
 }
 
-func (d *AliyunNLBDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	d.sslUploader.WithLogger(logger)
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 上传证书到 CAS
 	upres, err := d.sslUploader.Upload(ctx, certPem, privkeyPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to upload certificate file")
+	} else {
+		d.logger.Info("ssl certificate uploaded", slog.Any("result", upres))
 	}
-
-	d.logger.Logt("certificate file uploaded", upres)
 
 	// 根据部署资源类型决定部署方式
 	switch d.config.ResourceType {
-	case DEPLOY_RESOURCE_LOADBALANCER:
+	case RESOURCE_TYPE_LOADBALANCER:
 		if err := d.deployToLoadbalancer(ctx, upres.CertId); err != nil {
 			return nil, err
 		}
 
-	case DEPLOY_RESOURCE_LISTENER:
+	case RESOURCE_TYPE_LISTENER:
 		if err := d.deployToListener(ctx, upres.CertId); err != nil {
 			return nil, err
 		}
@@ -102,22 +104,21 @@ func (d *AliyunNLBDeployer) Deploy(ctx context.Context, certPem string, privkeyP
 	return &deployer.DeployResult{}, nil
 }
 
-func (d *AliyunNLBDeployer) deployToLoadbalancer(ctx context.Context, cloudCertId string) error {
+func (d *DeployerProvider) deployToLoadbalancer(ctx context.Context, cloudCertId string) error {
 	if d.config.LoadbalancerId == "" {
 		return errors.New("config `loadbalancerId` is required")
 	}
 
 	// 查询负载均衡实例的详细信息
 	// REF: https://help.aliyun.com/zh/slb/network-load-balancer/developer-reference/api-nlb-2022-04-30-getloadbalancerattribute
-	getLoadBalancerAttributeReq := &aliyunNlb.GetLoadBalancerAttributeRequest{
+	getLoadBalancerAttributeReq := &alinlb.GetLoadBalancerAttributeRequest{
 		LoadBalancerId: tea.String(d.config.LoadbalancerId),
 	}
 	getLoadBalancerAttributeResp, err := d.sdkClient.GetLoadBalancerAttribute(getLoadBalancerAttributeReq)
+	d.logger.Debug("sdk request 'nlb.GetLoadBalancerAttribute'", slog.Any("request", getLoadBalancerAttributeReq), slog.Any("response", getLoadBalancerAttributeResp))
 	if err != nil {
 		return xerrors.Wrap(err, "failed to execute sdk request 'nlb.GetLoadBalancerAttribute'")
 	}
-
-	d.logger.Logt("已查询到 NLB 负载均衡实例", getLoadBalancerAttributeResp)
 
 	// 查询 TCPSSL 监听列表
 	// REF: https://help.aliyun.com/zh/slb/network-load-balancer/developer-reference/api-nlb-2022-04-30-listlisteners
@@ -125,13 +126,14 @@ func (d *AliyunNLBDeployer) deployToLoadbalancer(ctx context.Context, cloudCertI
 	listListenersLimit := int32(100)
 	var listListenersToken *string = nil
 	for {
-		listListenersReq := &aliyunNlb.ListListenersRequest{
+		listListenersReq := &alinlb.ListListenersRequest{
 			MaxResults:       tea.Int32(listListenersLimit),
 			NextToken:        listListenersToken,
 			LoadBalancerIds:  []*string{tea.String(d.config.LoadbalancerId)},
 			ListenerProtocol: tea.String("TCPSSL"),
 		}
 		listListenersResp, err := d.sdkClient.ListListeners(listListenersReq)
+		d.logger.Debug("sdk request 'nlb.ListListeners'", slog.Any("request", listListenersReq), slog.Any("response", listListenersResp))
 		if err != nil {
 			return xerrors.Wrap(err, "failed to execute sdk request 'nlb.ListListeners'")
 		}
@@ -149,12 +151,11 @@ func (d *AliyunNLBDeployer) deployToLoadbalancer(ctx context.Context, cloudCertI
 		}
 	}
 
-	d.logger.Logt("已查询到 NLB 负载均衡实例下的全部 TCPSSL 监听", listenerIds)
-
 	// 遍历更新监听证书
 	if len(listenerIds) == 0 {
-		return errors.New("listener not found")
+		d.logger.Info("no nlb listeners to deploy")
 	} else {
+		d.logger.Info("found tcpssl listeners to deploy", slog.Any("listenerIds", listenerIds))
 		var errs []error
 
 		for _, listenerId := range listenerIds {
@@ -171,7 +172,7 @@ func (d *AliyunNLBDeployer) deployToLoadbalancer(ctx context.Context, cloudCertI
 	return nil
 }
 
-func (d *AliyunNLBDeployer) deployToListener(ctx context.Context, cloudCertId string) error {
+func (d *DeployerProvider) deployToListener(ctx context.Context, cloudCertId string) error {
 	if d.config.ListenerId == "" {
 		return errors.New("config `listenerId` is required")
 	}
@@ -184,50 +185,48 @@ func (d *AliyunNLBDeployer) deployToListener(ctx context.Context, cloudCertId st
 	return nil
 }
 
-func (d *AliyunNLBDeployer) updateListenerCertificate(ctx context.Context, cloudListenerId string, cloudCertId string) error {
+func (d *DeployerProvider) updateListenerCertificate(ctx context.Context, cloudListenerId string, cloudCertId string) error {
 	// 查询监听的属性
 	// REF: https://help.aliyun.com/zh/slb/network-load-balancer/developer-reference/api-nlb-2022-04-30-getlistenerattribute
-	getListenerAttributeReq := &aliyunNlb.GetListenerAttributeRequest{
+	getListenerAttributeReq := &alinlb.GetListenerAttributeRequest{
 		ListenerId: tea.String(cloudListenerId),
 	}
 	getListenerAttributeResp, err := d.sdkClient.GetListenerAttribute(getListenerAttributeReq)
+	d.logger.Debug("sdk request 'nlb.GetListenerAttribute'", slog.Any("request", getListenerAttributeReq), slog.Any("response", getListenerAttributeResp))
 	if err != nil {
 		return xerrors.Wrap(err, "failed to execute sdk request 'nlb.GetListenerAttribute'")
 	}
 
-	d.logger.Logt("已查询到 NLB 监听配置", getListenerAttributeResp)
-
 	// 修改监听的属性
 	// REF: https://help.aliyun.com/zh/slb/network-load-balancer/developer-reference/api-nlb-2022-04-30-updatelistenerattribute
-	updateListenerAttributeReq := &aliyunNlb.UpdateListenerAttributeRequest{
+	updateListenerAttributeReq := &alinlb.UpdateListenerAttributeRequest{
 		ListenerId:     tea.String(cloudListenerId),
 		CertificateIds: []*string{tea.String(cloudCertId)},
 	}
 	updateListenerAttributeResp, err := d.sdkClient.UpdateListenerAttribute(updateListenerAttributeReq)
+	d.logger.Debug("sdk request 'nlb.UpdateListenerAttribute'", slog.Any("request", updateListenerAttributeReq), slog.Any("response", updateListenerAttributeResp))
 	if err != nil {
 		return xerrors.Wrap(err, "failed to execute sdk request 'nlb.UpdateListenerAttribute'")
 	}
 
-	d.logger.Logt("已更新 NLB 监听配置", updateListenerAttributeResp)
-
 	return nil
 }
 
-func createSdkClient(accessKeyId, accessKeySecret, region string) (*aliyunNlb.Client, error) {
-	// 接入点一览 https://help.aliyun.com/zh/slb/network-load-balancer/developer-reference/api-nlb-2022-04-30-endpoint
+func createSdkClient(accessKeyId, accessKeySecret, region string) (*alinlb.Client, error) {
+	// 接入点一览 https://api.aliyun.com/product/Nlb
 	var endpoint string
 	switch region {
 	default:
 		endpoint = fmt.Sprintf("nlb.%s.aliyuncs.com", region)
 	}
 
-	config := &aliyunOpen.Config{
+	config := &aliopen.Config{
 		AccessKeyId:     tea.String(accessKeyId),
 		AccessKeySecret: tea.String(accessKeySecret),
 		Endpoint:        tea.String(endpoint),
 	}
 
-	client, err := aliyunNlb.NewClient(config)
+	client, err := alinlb.NewClient(config)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +247,7 @@ func createSslUploader(accessKeyId, accessKeySecret, region string) (uploader.Up
 		}
 	}
 
-	uploader, err := uploaderp.New(&uploaderp.AliyunCASUploaderConfig{
+	uploader, err := uploadersp.NewUploader(&uploadersp.UploaderConfig{
 		AccessKeyId:     accessKeyId,
 		AccessKeySecret: accessKeySecret,
 		Region:          casRegion,

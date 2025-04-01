@@ -2,100 +2,92 @@ package nodeprocessor
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
-	"time"
 
 	"github.com/usual2970/certimate/internal/domain"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
 	"github.com/usual2970/certimate/internal/repository"
 )
 
 type uploadNode struct {
-	node       *domain.WorkflowNode
+	node *domain.WorkflowNode
+	*nodeProcessor
+
+	certRepo   certificateRepository
 	outputRepo workflowOutputRepository
-	*nodeLogger
 }
 
 func NewUploadNode(node *domain.WorkflowNode) *uploadNode {
 	return &uploadNode{
-		node:       node,
-		nodeLogger: NewNodeLogger(node),
+		node:          node,
+		nodeProcessor: newNodeProcessor(node),
+
+		certRepo:   repository.NewCertificateRepository(),
 		outputRepo: repository.NewWorkflowOutputRepository(),
 	}
 }
 
-// Run 上传证书节点执行
-// 包含上传证书的工作流，理论上应该手动执行，如果每天定时执行，也只是重新保存一下
-func (n *uploadNode) Run(ctx context.Context) error {
-	n.AddOutput(ctx,
-		n.node.Name,
-		"进入上传证书节点",
-	)
+func (n *uploadNode) Process(ctx context.Context) error {
+	n.logger.Info("ready to upload ...")
 
-	config := n.node.GetConfigForUpload()
+	nodeConfig := n.node.GetConfigForUpload()
 
-	// 检查证书是否过期
-	// 如果证书过期，则直接返回错误
-	certX509, err := certs.ParseCertificateFromPEM(config.Certificate)
-	if err != nil {
-		n.AddOutput(ctx,
-			n.node.Name,
-			"解析证书失败",
-		)
+	// 查询上次执行结果
+	lastOutput, err := n.outputRepo.GetByNodeId(ctx, n.node.Id)
+	if err != nil && !domain.IsRecordNotFoundError(err) {
 		return err
 	}
 
-	if time.Now().After(certX509.NotAfter) {
-		n.AddOutput(ctx,
-			n.node.Name,
-			"证书已过期",
-		)
-		return errors.New("certificate is expired")
+	// 检测是否可以跳过本次执行
+	if skippable, skipReason := n.checkCanSkip(ctx, lastOutput); skippable {
+		n.logger.Info(fmt.Sprintf("skip this upload, because %s", skipReason))
+		return nil
+	} else if skipReason != "" {
+		n.logger.Info(fmt.Sprintf("re-upload, because %s", skipReason))
 	}
 
+	// 生成证书实体
 	certificate := &domain.Certificate{
-		Source:          domain.CertificateSourceTypeUpload,
-		SubjectAltNames: strings.Join(certX509.DNSNames, ";"),
-		Certificate:     config.Certificate,
-		PrivateKey:      config.PrivateKey,
-
-		EffectAt:       certX509.NotBefore,
-		ExpireAt:       certX509.NotAfter,
-		WorkflowId:     getContextWorkflowId(ctx),
-		WorkflowNodeId: n.node.Id,
+		Source: domain.CertificateSourceTypeUpload,
 	}
+	certificate.PopulateFromPEM(nodeConfig.Certificate, nodeConfig.PrivateKey)
 
 	// 保存执行结果
-	// TODO: 先保持一个节点始终只有一个输出，后续增加版本控制
-	currentOutput := &domain.WorkflowOutput{
+	output := &domain.WorkflowOutput{
 		WorkflowId: getContextWorkflowId(ctx),
+		RunId:      getContextWorkflowRunId(ctx),
 		NodeId:     n.node.Id,
 		Node:       n.node,
 		Succeeded:  true,
 		Outputs:    n.node.Outputs,
 	}
-
-	// 查询上次执行结果
-	lastOutput, err := n.outputRepo.GetByNodeId(ctx, n.node.Id)
-	if err != nil && !domain.IsRecordNotFoundError(err) {
-		n.AddOutput(ctx, n.node.Name, "查询上传记录失败", err.Error())
+	if _, err := n.outputRepo.SaveWithCertificate(ctx, output, certificate); err != nil {
+		n.logger.Warn("failed to save node output")
 		return err
 	}
-	if lastOutput != nil {
-		currentOutput.Id = lastOutput.Id
-	}
-	if err := n.outputRepo.Save(ctx, currentOutput, certificate, func(id string) error {
-		if certificate != nil {
-			certificate.WorkflowOutputId = id
-		}
 
-		return nil
-	}); err != nil {
-		n.AddOutput(ctx, n.node.Name, "保存上传记录失败", err.Error())
-		return err
-	}
-	n.AddOutput(ctx, n.node.Name, "保存上传记录成功")
+	n.logger.Info("upload completed")
 
 	return nil
+}
+
+func (n *uploadNode) checkCanSkip(ctx context.Context, lastOutput *domain.WorkflowOutput) (skip bool, reason string) {
+	if lastOutput != nil && lastOutput.Succeeded {
+		// 比较和上次上传时的关键配置（即影响证书上传的）参数是否一致
+		currentNodeConfig := n.node.GetConfigForUpload()
+		lastNodeConfig := lastOutput.Node.GetConfigForUpload()
+		if strings.TrimSpace(currentNodeConfig.Certificate) != strings.TrimSpace(lastNodeConfig.Certificate) {
+			return false, "the configuration item 'Certificate' changed"
+		}
+		if strings.TrimSpace(currentNodeConfig.PrivateKey) != strings.TrimSpace(lastNodeConfig.PrivateKey) {
+			return false, "the configuration item 'PrivateKey' changed"
+		}
+
+		lastCertificate, _ := n.certRepo.GetByWorkflowNodeId(ctx, n.node.Id)
+		if lastCertificate != nil {
+			return true, "the certificate has already been uploaded"
+		}
+	}
+
+	return false, ""
 }

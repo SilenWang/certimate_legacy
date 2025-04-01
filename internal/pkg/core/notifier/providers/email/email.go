@@ -3,8 +3,8 @@
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
+	"log/slog"
 	"net/smtp"
 
 	"github.com/domodwyer/mailyak/v3"
@@ -12,7 +12,7 @@ import (
 	"github.com/usual2970/certimate/internal/pkg/core/notifier"
 )
 
-type EmailNotifierConfig struct {
+type NotifierConfig struct {
 	// SMTP 服务器地址。
 	SmtpHost string `json:"smtpHost"`
 	// SMTP 服务器端口。
@@ -30,23 +30,33 @@ type EmailNotifierConfig struct {
 	ReceiverAddress string `json:"receiverAddress"`
 }
 
-type EmailNotifier struct {
-	config *EmailNotifierConfig
+type NotifierProvider struct {
+	config *NotifierConfig
+	logger *slog.Logger
 }
 
-var _ notifier.Notifier = (*EmailNotifier)(nil)
+var _ notifier.Notifier = (*NotifierProvider)(nil)
 
-func New(config *EmailNotifierConfig) (*EmailNotifier, error) {
+func NewNotifier(config *NotifierConfig) (*NotifierProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	return &EmailNotifier{
+	return &NotifierProvider{
 		config: config,
 	}, nil
 }
 
-func (n *EmailNotifier) Notify(ctx context.Context, subject string, message string) (res *notifier.NotifyResult, err error) {
+func (n *NotifierProvider) WithLogger(logger *slog.Logger) notifier.Notifier {
+	if logger == nil {
+		n.logger = slog.Default()
+	} else {
+		n.logger = logger
+	}
+	return n
+}
+
+func (n *NotifierProvider) Notify(ctx context.Context, subject string, message string) (res *notifier.NotifyResult, err error) {
 	var smtpAuth smtp.Auth
 	if n.config.Username != "" || n.config.Password != "" {
 		smtpAuth = smtp.PlainAuth("", n.config.Username, n.config.Password, n.config.SmtpHost)

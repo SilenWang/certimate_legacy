@@ -5,50 +5,61 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	bpCdn "github.com/byteplus-sdk/byteplus-sdk-golang/service/cdn"
+	bytepluscdn "github.com/byteplus-sdk/byteplus-sdk-golang/service/cdn"
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 )
 
-type ByteplusCDNUploaderConfig struct {
+type UploaderConfig struct {
 	// BytePlus AccessKey。
 	AccessKey string `json:"accessKey"`
 	// BytePlus SecretKey。
 	SecretKey string `json:"secretKey"`
 }
 
-type ByteplusCDNUploader struct {
-	config    *ByteplusCDNUploaderConfig
-	sdkClient *bpCdn.CDN
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *bytepluscdn.CDN
 }
 
-var _ uploader.Uploader = (*ByteplusCDNUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *ByteplusCDNUploaderConfig) (*ByteplusCDNUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	client := bpCdn.NewInstance()
+	client := bytepluscdn.NewInstance()
 	client.Client.SetAccessKey(config.AccessKey)
 	client.Client.SetSecretKey(config.SecretKey)
 
-	return &ByteplusCDNUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *ByteplusCDNUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 解析证书内容
-	certX509, err := certs.ParseCertificateFromPEM(certPem)
+	certX509, err := certutil.ParseCertificateFromPEM(certPem)
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +69,14 @@ func (u *ByteplusCDNUploader) Upload(ctx context.Context, certPem string, privke
 	listCertInfoPageNum := int64(1)
 	listCertInfoPageSize := int64(100)
 	listCertInfoTotal := 0
-	listCertInfoReq := &bpCdn.ListCertInfoRequest{
-		PageNum:  bpCdn.GetInt64Ptr(listCertInfoPageNum),
-		PageSize: bpCdn.GetInt64Ptr(listCertInfoPageSize),
-		Source:   bpCdn.GetStrPtr("cert_center"),
+	listCertInfoReq := &bytepluscdn.ListCertInfoRequest{
+		PageNum:  bytepluscdn.GetInt64Ptr(listCertInfoPageNum),
+		PageSize: bytepluscdn.GetInt64Ptr(listCertInfoPageSize),
+		Source:   bytepluscdn.GetStrPtr("cert_center"),
 	}
 	for {
 		listCertInfoResp, err := u.sdkClient.ListCertInfo(listCertInfoReq)
+		u.logger.Debug("sdk request 'cdn.ListCertInfo'", slog.Any("request", listCertInfoReq), slog.Any("response", listCertInfoResp))
 		if err != nil {
 			return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.ListCertInfo'")
 		}
@@ -75,8 +87,9 @@ func (u *ByteplusCDNUploader) Upload(ctx context.Context, certPem string, privke
 				fingerprintSha256 := sha256.Sum256(certX509.Raw)
 				isSameCert := strings.EqualFold(hex.EncodeToString(fingerprintSha1[:]), certDetail.CertFingerprint.Sha1) &&
 					strings.EqualFold(hex.EncodeToString(fingerprintSha256[:]), certDetail.CertFingerprint.Sha256)
-				// 如果已存在相同证书，直接返回已有的证书信息
+				// 如果已存在相同证书，直接返回
 				if isSameCert {
+					u.logger.Info("ssl certificate already exists")
 					return &uploader.UploadResult{
 						CertId:   certDetail.CertId,
 						CertName: certDetail.Desc,
@@ -100,13 +113,14 @@ func (u *ByteplusCDNUploader) Upload(ctx context.Context, certPem string, privke
 
 	// 上传新证书
 	// REF: https://docs.byteplus.com/en/docs/byteplus-cdn/reference-addcertificate
-	addCertificateReq := &bpCdn.AddCertificateRequest{
+	addCertificateReq := &bytepluscdn.AddCertificateRequest{
 		Certificate: certPem,
 		PrivateKey:  privkeyPem,
-		Source:      bpCdn.GetStrPtr("cert_center"),
-		Desc:        bpCdn.GetStrPtr(certName),
+		Source:      bytepluscdn.GetStrPtr("cert_center"),
+		Desc:        bytepluscdn.GetStrPtr(certName),
 	}
 	addCertificateResp, err := u.sdkClient.AddCertificate(addCertificateReq)
+	u.logger.Debug("sdk request 'cdn.AddCertificate'", slog.Any("request", addCertificateReq), slog.Any("response", addCertificateResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.AddCertificate'")
 	}

@@ -1,16 +1,34 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { DeleteOutlined as DeleteOutlinedIcon, SelectOutlined as SelectOutlinedIcon } from "@ant-design/icons";
+import { DeleteOutlined as DeleteOutlinedIcon, ReloadOutlined as ReloadOutlinedIcon, SelectOutlined as SelectOutlinedIcon } from "@ant-design/icons";
 import { PageHeader } from "@ant-design/pro-components";
 import { useRequest } from "ahooks";
-import { Button, Divider, Empty, Menu, type MenuProps, Modal, Radio, Space, Table, type TableProps, Tooltip, Typography, notification, theme } from "antd";
+import {
+  Button,
+  Card,
+  Divider,
+  Empty,
+  Flex,
+  Input,
+  Menu,
+  type MenuProps,
+  Modal,
+  Radio,
+  Space,
+  Table,
+  type TableProps,
+  Tooltip,
+  Typography,
+  notification,
+  theme,
+} from "antd";
 import dayjs from "dayjs";
 import { ClientResponseError } from "pocketbase";
 
 import CertificateDetailDrawer from "@/components/certificate/CertificateDetailDrawer";
 import { CERTIFICATE_SOURCES, type CertificateModel } from "@/domain/certificate";
-import { type ListCertificateRequest, list as listCertificate, remove as removeCertificate } from "@/repository/certificate";
+import { list as listCertificates, type ListRequest as listCertificatesRequest, remove as removeCertificate } from "@/repository/certificate";
 import { getErrMsg } from "@/utils/error";
 
 const CertificateList = () => {
@@ -108,6 +126,16 @@ const CertificateList = () => {
       },
     },
     {
+      key: "issuer",
+      title: t("certificate.props.brand"),
+      render: (_, record) => (
+        <Space className="max-w-full" direction="vertical" size={4}>
+          <Typography.Text>{record.issuer}</Typography.Text>
+          <Typography.Text>{record.keyAlgorithm}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
       key: "source",
       title: t("certificate.props.source"),
       ellipsis: true,
@@ -159,7 +187,7 @@ const CertificateList = () => {
       fixed: "right",
       width: 120,
       render: (_, record) => (
-        <Button.Group>
+        <Space.Compact>
           <CertificateDetailDrawer
             data={record}
             trigger={
@@ -172,7 +200,7 @@ const CertificateList = () => {
           <Tooltip title={t("certificate.action.delete")}>
             <Button color="danger" icon={<DeleteOutlinedIcon />} variant="text" onClick={() => handleDeleteClick(record)} />
           </Tooltip>
-        </Button.Group>
+        </Space.Compact>
       ),
     },
   ];
@@ -181,6 +209,7 @@ const CertificateList = () => {
 
   const [filters, setFilters] = useState<Record<string, unknown>>(() => {
     return {
+      keyword: searchParams.get("keyword"),
       state: searchParams.get("state"),
     };
   });
@@ -194,10 +223,11 @@ const CertificateList = () => {
     run: refreshData,
   } = useRequest(
     () => {
-      return listCertificate({
+      return listCertificates({
+        keyword: filters["keyword"] as string,
+        state: filters["state"] as listCertificatesRequest["state"],
         page: page,
         perPage: pageSize,
-        state: filters["state"] as ListCertificateRequest["state"],
       });
     },
     {
@@ -218,6 +248,16 @@ const CertificateList = () => {
       },
     }
   );
+
+  const handleSearch = (value: string) => {
+    setFilters((prev) => ({ ...prev, keyword: value.trim() }));
+  };
+
+  const handleReloadClick = () => {
+    if (loading) return;
+
+    refreshData();
+  };
 
   const handleDeleteClick = (certificate: CertificateModel) => {
     modalApi.confirm({
@@ -245,30 +285,43 @@ const CertificateList = () => {
 
       <PageHeader title={t("certificate.page.title")} />
 
-      <Table<CertificateModel>
-        columns={tableColumns}
-        dataSource={tableData}
-        loading={loading}
-        locale={{
-          emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadedError ? getErrMsg(loadedError) : t("certificate.nodata")} />,
-        }}
-        pagination={{
-          current: page,
-          pageSize: pageSize,
-          total: tableTotal,
-          showSizeChanger: true,
-          onChange: (page: number, pageSize: number) => {
-            setPage(page);
-            setPageSize(pageSize);
-          },
-          onShowSizeChange: (page: number, pageSize: number) => {
-            setPage(page);
-            setPageSize(pageSize);
-          },
-        }}
-        rowKey={(record: CertificateModel) => record.id}
-        scroll={{ x: "max(100%, 960px)" }}
-      />
+      <Card size="small">
+        <div className="mb-4">
+          <Flex gap="small">
+            <div className="flex-1">
+              <Input.Search allowClear defaultValue={filters["keyword"] as string} placeholder={t("certificate.search.placeholder")} onSearch={handleSearch} />
+            </div>
+            <div>
+              <Button icon={<ReloadOutlinedIcon spin={loading} />} onClick={handleReloadClick} />
+            </div>
+          </Flex>
+        </div>
+
+        <Table<CertificateModel>
+          columns={tableColumns}
+          dataSource={tableData}
+          loading={loading}
+          locale={{
+            emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={getErrMsg(loadedError ?? t("certificate.nodata"))} />,
+          }}
+          pagination={{
+            current: page,
+            pageSize: pageSize,
+            total: tableTotal,
+            showSizeChanger: true,
+            onChange: (page: number, pageSize: number) => {
+              setPage(page);
+              setPageSize(pageSize);
+            },
+            onShowSizeChange: (page: number, pageSize: number) => {
+              setPage(page);
+              setPageSize(pageSize);
+            },
+          }}
+          rowKey={(record) => record.id}
+          scroll={{ x: "max(100%, 960px)" }}
+        />
+      </Card>
     </div>
   );
 };

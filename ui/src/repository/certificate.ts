@@ -1,46 +1,57 @@
 import dayjs from "dayjs";
-import { type RecordListOptions } from "pocketbase";
 
 import { type CertificateModel } from "@/domain/certificate";
-import { getPocketBase } from "./_pocketbase";
+import { COLLECTION_NAME_CERTIFICATE, getPocketBase } from "./_pocketbase";
 
-const COLLECTION_NAME = "certificate";
-
-export type ListCertificateRequest = {
+export type ListRequest = {
+  keyword?: string;
+  state?: "expireSoon" | "expired";
   page?: number;
   perPage?: number;
-  state?: "expireSoon" | "expired";
 };
 
-export const list = async (request: ListCertificateRequest) => {
+export const list = async (request: ListRequest) => {
   const pb = getPocketBase();
+
+  const filters: string[] = ["deleted=null"];
+  if (request.keyword) {
+    filters.push(pb.filter("(subjectAltNames~{:keyword} || serialNumber={:keyword})", { keyword: request.keyword }));
+  }
+  if (request.state === "expireSoon") {
+    filters.push(pb.filter("expireAt<{:expiredAt}", { expiredAt: dayjs().add(20, "d").toDate() }));
+  } else if (request.state === "expired") {
+    filters.push(pb.filter("expireAt<={:expiredAt}", { expiredAt: new Date() }));
+  }
 
   const page = request.page || 1;
   const perPage = request.perPage || 10;
-
-  const options: RecordListOptions = {
+  return pb.collection(COLLECTION_NAME_CERTIFICATE).getList<CertificateModel>(page, perPage, {
     expand: "workflowId",
-    filter: "deleted=null",
+    filter: filters.join(" && "),
     sort: "-created",
     requestKey: null,
+  });
+};
+
+export const listByWorkflowRunId = async (workflowRunId: string) => {
+  const pb = getPocketBase();
+
+  const list = await pb.collection(COLLECTION_NAME_CERTIFICATE).getFullList<CertificateModel>({
+    batch: 65535,
+    filter: pb.filter("workflowRunId={:workflowRunId}", { workflowRunId: workflowRunId }),
+    sort: "created",
+    requestKey: null,
+  });
+
+  return {
+    totalItems: list.length,
+    items: list,
   };
-
-  if (request.state === "expireSoon") {
-    options.filter = pb.filter("expireAt<{:expiredAt} && deleted=null", {
-      expiredAt: dayjs().add(20, "d").toDate(),
-    });
-  } else if (request.state === "expired") {
-    options.filter = pb.filter("expireAt<={:expiredAt} && deleted=null", {
-      expiredAt: new Date(),
-    });
-  }
-
-  return pb.collection(COLLECTION_NAME).getList<CertificateModel>(page, perPage, options);
 };
 
 export const remove = async (record: MaybeModelRecordWithId<CertificateModel>) => {
   await getPocketBase()
-    .collection(COLLECTION_NAME)
+    .collection(COLLECTION_NAME_CERTIFICATE)
     .update<CertificateModel>(record.id!, { deleted: dayjs.utc().format("YYYY-MM-DD HH:mm:ss") });
   return true;
 };

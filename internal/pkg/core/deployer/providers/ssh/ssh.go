@@ -1,10 +1,10 @@
-package ssh
+﻿package ssh
 
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -14,11 +14,10 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 )
 
-type SshDeployerConfig struct {
+type DeployerConfig struct {
 	// SSH 主机。
 	// 零值时默认为 "localhost"。
 	SshHost string `json:"sshHost,omitempty"`
@@ -59,33 +58,34 @@ type SshDeployerConfig struct {
 	JksStorepass string `json:"jksStorepass,omitempty"`
 }
 
-type SshDeployer struct {
-	config *SshDeployerConfig
-	logger logger.Logger
+type DeployerProvider struct {
+	config *DeployerConfig
+	logger *slog.Logger
 }
 
-var _ deployer.Deployer = (*SshDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *SshDeployerConfig) (*SshDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *SshDeployerConfig, logger logger.Logger) (*SshDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	if logger == nil {
-		return nil, errors.New("logger is nil")
-	}
-
-	return &SshDeployer{
-		logger: logger,
+	return &DeployerProvider{
 		config: config,
+		logger: slog.Default(),
 	}, nil
 }
 
-func (d *SshDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 连接
 	client, err := createSshClient(
 		d.config.SshHost,
@@ -100,16 +100,15 @@ func (d *SshDeployer) Deploy(ctx context.Context, certPem string, privkeyPem str
 	}
 	defer client.Close()
 
-	d.logger.Logt("SSH connected")
+	d.logger.Info("ssh connected")
 
 	// 执行前置命令
 	if d.config.PreCommand != "" {
 		stdout, stderr, err := execSshCommand(client, d.config.PreCommand)
+		d.logger.Debug("run pre-command", slog.String("stdout", stdout), slog.String("stderr", stderr))
 		if err != nil {
 			return nil, xerrors.Wrapf(err, "failed to execute pre-command: stdout: %s, stderr: %s", stdout, stderr)
 		}
-
-		d.logger.Logt("SSH pre-command executed", stdout)
 	}
 
 	// 上传证书和私钥文件
@@ -118,42 +117,36 @@ func (d *SshDeployer) Deploy(ctx context.Context, certPem string, privkeyPem str
 		if err := writeFileString(client, d.config.UseSCP, d.config.OutputCertPath, certPem); err != nil {
 			return nil, xerrors.Wrap(err, "failed to upload certificate file")
 		}
-
-		d.logger.Logt("certificate file uploaded")
+		d.logger.Info("ssl certificate file uploaded", slog.String("path", d.config.OutputCertPath))
 
 		if err := writeFileString(client, d.config.UseSCP, d.config.OutputKeyPath, privkeyPem); err != nil {
 			return nil, xerrors.Wrap(err, "failed to upload private key file")
 		}
-
-		d.logger.Logt("private key file uploaded")
+		d.logger.Info("ssl private key file uploaded", slog.String("path", d.config.OutputKeyPath))
 
 	case OUTPUT_FORMAT_PFX:
-		pfxData, err := certs.TransformCertificateFromPEMToPFX(certPem, privkeyPem, d.config.PfxPassword)
+		pfxData, err := certutil.TransformCertificateFromPEMToPFX(certPem, privkeyPem, d.config.PfxPassword)
 		if err != nil {
 			return nil, xerrors.Wrap(err, "failed to transform certificate to PFX")
 		}
-
-		d.logger.Logt("certificate transformed to PFX")
+		d.logger.Info("ssl certificate transformed to pfx")
 
 		if err := writeFile(client, d.config.UseSCP, d.config.OutputCertPath, pfxData); err != nil {
 			return nil, xerrors.Wrap(err, "failed to upload certificate file")
 		}
-
-		d.logger.Logt("certificate file uploaded")
+		d.logger.Info("ssl certificate file uploaded", slog.String("path", d.config.OutputCertPath))
 
 	case OUTPUT_FORMAT_JKS:
-		jksData, err := certs.TransformCertificateFromPEMToJKS(certPem, privkeyPem, d.config.JksAlias, d.config.JksKeypass, d.config.JksStorepass)
+		jksData, err := certutil.TransformCertificateFromPEMToJKS(certPem, privkeyPem, d.config.JksAlias, d.config.JksKeypass, d.config.JksStorepass)
 		if err != nil {
 			return nil, xerrors.Wrap(err, "failed to transform certificate to JKS")
 		}
-
-		d.logger.Logt("certificate transformed to JKS")
+		d.logger.Info("ssl certificate transformed to jks")
 
 		if err := writeFile(client, d.config.UseSCP, d.config.OutputCertPath, jksData); err != nil {
 			return nil, xerrors.Wrap(err, "failed to upload certificate file")
 		}
-
-		d.logger.Logt("certificate file uploaded")
+		d.logger.Info("ssl certificate file uploaded", slog.String("path", d.config.OutputCertPath))
 
 	default:
 		return nil, fmt.Errorf("unsupported output format: %s", d.config.OutputFormat)
@@ -162,11 +155,10 @@ func (d *SshDeployer) Deploy(ctx context.Context, certPem string, privkeyPem str
 	// 执行后置命令
 	if d.config.PostCommand != "" {
 		stdout, stderr, err := execSshCommand(client, d.config.PostCommand)
+		d.logger.Debug("run post-command", slog.String("stdout", stdout), slog.String("stderr", stderr))
 		if err != nil {
 			return nil, xerrors.Wrapf(err, "failed to execute post-command, stdout: %s, stderr: %s", stdout, stderr)
 		}
-
-		d.logger.Logt("SSH post-command executed", stdout)
 	}
 
 	return &deployer.DeployResult{}, nil

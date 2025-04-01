@@ -2,22 +2,21 @@
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/global"
-	hcCdn "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2"
-	hcCdnModel "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2/model"
-	hcCdnRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2/region"
+	hccdn "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2"
+	hccdnmodel "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2/model"
+	hccdnregion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cdn/v2/region"
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	uploaderp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/huaweicloud-scm"
+	uploadersp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/huaweicloud-scm"
 	hwsdk "github.com/usual2970/certimate/internal/pkg/vendors/huaweicloud-sdk"
 )
 
-type HuaweiCloudCDNDeployerConfig struct {
+type DeployerConfig struct {
 	// 华为云 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 华为云 SecretAccessKey。
@@ -28,26 +27,18 @@ type HuaweiCloudCDNDeployerConfig struct {
 	Domain string `json:"domain"`
 }
 
-type HuaweiCloudCDNDeployer struct {
-	config      *HuaweiCloudCDNDeployerConfig
-	logger      logger.Logger
-	sdkClient   *hcCdn.CdnClient
+type DeployerProvider struct {
+	config      *DeployerConfig
+	logger      *slog.Logger
+	sdkClient   *hccdn.CdnClient
 	sslUploader uploader.Uploader
 }
 
-var _ deployer.Deployer = (*HuaweiCloudCDNDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *HuaweiCloudCDNDeployerConfig) (*HuaweiCloudCDNDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *HuaweiCloudCDNDeployerConfig, logger logger.Logger) (*HuaweiCloudCDNDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(
@@ -59,7 +50,7 @@ func NewWithLogger(config *HuaweiCloudCDNDeployerConfig, logger logger.Logger) (
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	uploader, err := uploaderp.New(&uploaderp.HuaweiCloudSCMUploaderConfig{
+	uploader, err := uploadersp.NewUploader(&uploadersp.UploaderConfig{
 		AccessKeyId:     config.AccessKeyId,
 		SecretAccessKey: config.SecretAccessKey,
 	})
@@ -67,61 +58,69 @@ func NewWithLogger(config *HuaweiCloudCDNDeployerConfig, logger logger.Logger) (
 		return nil, xerrors.Wrap(err, "failed to create ssl uploader")
 	}
 
-	return &HuaweiCloudCDNDeployer{
-		logger:      logger,
+	return &DeployerProvider{
 		config:      config,
+		logger:      slog.Default(),
 		sdkClient:   client,
 		sslUploader: uploader,
 	}, nil
 }
 
-func (d *HuaweiCloudCDNDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	d.sslUploader.WithLogger(logger)
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 上传证书到 SCM
 	upres, err := d.sslUploader.Upload(ctx, certPem, privkeyPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to upload certificate file")
+	} else {
+		d.logger.Info("ssl certificate uploaded", slog.Any("result", upres))
 	}
-
-	d.logger.Logt("certificate file uploaded", upres)
 
 	// 查询加速域名配置
 	// REF: https://support.huaweicloud.com/api-cdn/ShowDomainFullConfig.html
-	showDomainFullConfigReq := &hcCdnModel.ShowDomainFullConfigRequest{
+	showDomainFullConfigReq := &hccdnmodel.ShowDomainFullConfigRequest{
 		DomainName: d.config.Domain,
 	}
 	showDomainFullConfigResp, err := d.sdkClient.ShowDomainFullConfig(showDomainFullConfigReq)
+	d.logger.Debug("sdk request 'cdn.ShowDomainFullConfig'", slog.Any("request", showDomainFullConfigReq), slog.Any("response", showDomainFullConfigResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.ShowDomainFullConfig'")
 	}
 
-	d.logger.Logt("已查询到加速域名配置", showDomainFullConfigResp)
-
 	// 更新加速域名配置
 	// REF: https://support.huaweicloud.com/api-cdn/UpdateDomainMultiCertificates.html
 	// REF: https://support.huaweicloud.com/usermanual-cdn/cdn_01_0306.html
-	updateDomainMultiCertificatesReqBodyContent := &hcCdnModel.UpdateDomainMultiCertificatesRequestBodyContent{}
+	updateDomainMultiCertificatesReqBodyContent := &hccdnmodel.UpdateDomainMultiCertificatesRequestBodyContent{}
 	updateDomainMultiCertificatesReqBodyContent.DomainName = d.config.Domain
 	updateDomainMultiCertificatesReqBodyContent.HttpsSwitch = 1
 	updateDomainMultiCertificatesReqBodyContent.CertificateType = hwsdk.Int32Ptr(2)
 	updateDomainMultiCertificatesReqBodyContent.ScmCertificateId = hwsdk.StringPtr(upres.CertId)
 	updateDomainMultiCertificatesReqBodyContent.CertName = hwsdk.StringPtr(upres.CertName)
 	updateDomainMultiCertificatesReqBodyContent = assign(updateDomainMultiCertificatesReqBodyContent, showDomainFullConfigResp.Configs)
-	updateDomainMultiCertificatesReq := &hcCdnModel.UpdateDomainMultiCertificatesRequest{
-		Body: &hcCdnModel.UpdateDomainMultiCertificatesRequestBody{
+	updateDomainMultiCertificatesReq := &hccdnmodel.UpdateDomainMultiCertificatesRequest{
+		Body: &hccdnmodel.UpdateDomainMultiCertificatesRequestBody{
 			Https: updateDomainMultiCertificatesReqBodyContent,
 		},
 	}
 	updateDomainMultiCertificatesResp, err := d.sdkClient.UpdateDomainMultiCertificates(updateDomainMultiCertificatesReq)
+	d.logger.Debug("sdk request 'cdn.UploadDomainMultiCertificates'", slog.Any("request", updateDomainMultiCertificatesReq), slog.Any("response", updateDomainMultiCertificatesResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.UploadDomainMultiCertificates'")
 	}
 
-	d.logger.Logt("已更新加速域名配置", updateDomainMultiCertificatesResp)
-
 	return &deployer.DeployResult{}, nil
 }
 
-func createSdkClient(accessKeyId, secretAccessKey, region string) (*hcCdn.CdnClient, error) {
+func createSdkClient(accessKeyId, secretAccessKey, region string) (*hccdn.CdnClient, error) {
 	if region == "" {
 		region = "cn-north-1" // CDN 服务默认区域：华北一北京
 	}
@@ -134,12 +133,12 @@ func createSdkClient(accessKeyId, secretAccessKey, region string) (*hcCdn.CdnCli
 		return nil, err
 	}
 
-	hcRegion, err := hcCdnRegion.SafeValueOf(region)
+	hcRegion, err := hccdnregion.SafeValueOf(region)
 	if err != nil {
 		return nil, err
 	}
 
-	hcClient, err := hcCdn.CdnClientBuilder().
+	hcClient, err := hccdn.CdnClientBuilder().
 		WithRegion(hcRegion).
 		WithCredential(auth).
 		SafeBuild()
@@ -147,42 +146,44 @@ func createSdkClient(accessKeyId, secretAccessKey, region string) (*hcCdn.CdnCli
 		return nil, err
 	}
 
-	client := hcCdn.NewCdnClient(hcClient)
+	client := hccdn.NewCdnClient(hcClient)
 	return client, nil
 }
 
-func assign(reqContent *hcCdnModel.UpdateDomainMultiCertificatesRequestBodyContent, target *hcCdnModel.ConfigsGetBody) *hcCdnModel.UpdateDomainMultiCertificatesRequestBodyContent {
+func assign(source *hccdnmodel.UpdateDomainMultiCertificatesRequestBodyContent, target *hccdnmodel.ConfigsGetBody) *hccdnmodel.UpdateDomainMultiCertificatesRequestBodyContent {
+	// `UpdateDomainMultiCertificates` 中不传的字段表示使用默认值、而非保留原值，
+	// 因此这里需要把原配置中的参数重新赋值回去。
+
 	if target == nil {
-		return reqContent
+		return source
 	}
 
-	// 华为云 API 中不传的字段表示使用默认值、而非保留原值，因此这里需要把原配置中的参数重新赋值回去。
-	// 而且蛋疼的是查询接口返回的数据结构和更新接口传入的参数结构不一致，需要做很多转化。
-
 	if *target.OriginProtocol == "follow" {
-		reqContent.AccessOriginWay = hwsdk.Int32Ptr(1)
+		source.AccessOriginWay = hwsdk.Int32Ptr(1)
 	} else if *target.OriginProtocol == "http" {
-		reqContent.AccessOriginWay = hwsdk.Int32Ptr(2)
+		source.AccessOriginWay = hwsdk.Int32Ptr(2)
 	} else if *target.OriginProtocol == "https" {
-		reqContent.AccessOriginWay = hwsdk.Int32Ptr(3)
+		source.AccessOriginWay = hwsdk.Int32Ptr(3)
 	}
 
 	if target.ForceRedirect != nil {
-		reqContent.ForceRedirectConfig = &hcCdnModel.ForceRedirect{}
+		if source.ForceRedirectConfig == nil {
+			source.ForceRedirectConfig = &hccdnmodel.ForceRedirect{}
+		}
 
 		if target.ForceRedirect.Status == "on" {
-			reqContent.ForceRedirectConfig.Switch = 1
-			reqContent.ForceRedirectConfig.RedirectType = target.ForceRedirect.Type
+			source.ForceRedirectConfig.Switch = 1
+			source.ForceRedirectConfig.RedirectType = target.ForceRedirect.Type
 		} else {
-			reqContent.ForceRedirectConfig.Switch = 0
+			source.ForceRedirectConfig.Switch = 0
 		}
 	}
 
 	if target.Https != nil {
 		if *target.Https.Http2Status == "on" {
-			reqContent.Http2 = hwsdk.Int32Ptr(1)
+			source.Http2 = hwsdk.Int32Ptr(1)
 		}
 	}
 
-	return reqContent
+	return source
 }

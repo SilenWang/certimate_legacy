@@ -18,7 +18,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/usual2970/certimate/internal/domain"
-	uslices "github.com/usual2970/certimate/internal/pkg/utils/slices"
+	"github.com/usual2970/certimate/internal/pkg/utils/sliceutil"
 	"github.com/usual2970/certimate/internal/repository"
 )
 
@@ -26,6 +26,7 @@ type ApplyCertResult struct {
 	CertificateFullChain string
 	IssuerCertificate    string
 	PrivateKey           string
+	ACMEAccountUrl       string
 	ACMECertUrl          string
 	ACMECertStableUrl    string
 	CSR                  string
@@ -46,8 +47,7 @@ type applicantOptions struct {
 	DnsPropagationTimeout int32
 	DnsTTL                int32
 	DisableFollowCNAME    bool
-	DisableARI            bool
-	SkipBeforeExpiryDays  int32
+	ReplacedARIAcctId     string
 	ReplacedARICertId     string
 }
 
@@ -58,29 +58,22 @@ func NewWithApplyNode(node *domain.WorkflowNode) (Applicant, error) {
 
 	nodeConfig := node.GetConfigForApply()
 	options := &applicantOptions{
-		Domains:               uslices.Filter(strings.Split(nodeConfig.Domains, ";"), func(s string) bool { return s != "" }),
+		Domains:               sliceutil.Filter(strings.Split(nodeConfig.Domains, ";"), func(s string) bool { return s != "" }),
 		ContactEmail:          nodeConfig.ContactEmail,
 		Provider:              domain.ApplyDNSProviderType(nodeConfig.Provider),
 		ProviderApplyConfig:   nodeConfig.ProviderConfig,
 		KeyAlgorithm:          nodeConfig.KeyAlgorithm,
-		Nameservers:           uslices.Filter(strings.Split(nodeConfig.Nameservers, ";"), func(s string) bool { return s != "" }),
+		Nameservers:           sliceutil.Filter(strings.Split(nodeConfig.Nameservers, ";"), func(s string) bool { return s != "" }),
 		DnsPropagationTimeout: nodeConfig.DnsPropagationTimeout,
 		DnsTTL:                nodeConfig.DnsTTL,
 		DisableFollowCNAME:    nodeConfig.DisableFollowCNAME,
-		DisableARI:            nodeConfig.DisableARI,
-		SkipBeforeExpiryDays:  nodeConfig.SkipBeforeExpiryDays,
 	}
 
 	accessRepo := repository.NewAccessRepository()
 	if access, err := accessRepo.GetById(context.Background(), nodeConfig.ProviderAccessId); err != nil {
 		return nil, fmt.Errorf("failed to get access #%s record: %w", nodeConfig.ProviderAccessId, err)
 	} else {
-		accessConfig, err := access.UnmarshalConfigToMap()
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal access config: %w", err)
-		}
-
-		options.ProviderAccessConfig = accessConfig
+		options.ProviderAccessConfig = access.Config
 	}
 
 	certRepo := repository.NewCertificateRepository()
@@ -95,6 +88,7 @@ func NewWithApplyNode(node *domain.WorkflowNode) (Applicant, error) {
 			lastCertX509, _ := certcrypto.ParsePEMCertificate([]byte(lastCertificate.Certificate))
 			if lastCertX509 != nil {
 				replacedARICertId, _ := certificate.MakeARICertID(lastCertX509)
+				options.ReplacedARIAcctId = lastCertificate.ACMEAccountUrl
 				options.ReplacedARICertId = replacedARICertId
 			}
 		}
@@ -141,7 +135,7 @@ func apply(challengeProvider challenge.Provider, options *applicantOptions) (*Ap
 	// Create an ACME client config
 	config := lego.NewConfig(acmeUser)
 	config.CADirURL = sslProviderUrls[sslProviderConfig.Provider]
-	config.Certificate.KeyType = parseKeyAlgorithm(options.KeyAlgorithm)
+	config.Certificate.KeyType = parseKeyAlgorithm(domain.CertificateKeyAlgorithmType(options.KeyAlgorithm))
 
 	// Create an ACME client
 	client, err := lego.NewClient(config)
@@ -171,7 +165,7 @@ func apply(challengeProvider challenge.Provider, options *applicantOptions) (*Ap
 		Domains: options.Domains,
 		Bundle:  true,
 	}
-	if !options.DisableARI {
+	if options.ReplacedARICertId != "" && options.ReplacedARIAcctId != acmeUser.Registration.URI {
 		certRequest.ReplacesCertID = options.ReplacedARICertId
 	}
 	certResource, err := client.Certificate.Obtain(certRequest)
@@ -183,29 +177,30 @@ func apply(challengeProvider challenge.Provider, options *applicantOptions) (*Ap
 		CertificateFullChain: strings.TrimSpace(string(certResource.Certificate)),
 		IssuerCertificate:    strings.TrimSpace(string(certResource.IssuerCertificate)),
 		PrivateKey:           strings.TrimSpace(string(certResource.PrivateKey)),
+		ACMEAccountUrl:       acmeUser.Registration.URI,
 		ACMECertUrl:          certResource.CertURL,
 		ACMECertStableUrl:    certResource.CertStableURL,
 		CSR:                  strings.TrimSpace(string(certResource.CSR)),
 	}, nil
 }
 
-func parseKeyAlgorithm(algo string) certcrypto.KeyType {
+func parseKeyAlgorithm(algo domain.CertificateKeyAlgorithmType) certcrypto.KeyType {
 	switch algo {
-	case "RSA2048":
+	case domain.CertificateKeyAlgorithmTypeRSA2048:
 		return certcrypto.RSA2048
-	case "RSA3072":
+	case domain.CertificateKeyAlgorithmTypeRSA3072:
 		return certcrypto.RSA3072
-	case "RSA4096":
+	case domain.CertificateKeyAlgorithmTypeRSA4096:
 		return certcrypto.RSA4096
-	case "RSA8192":
+	case domain.CertificateKeyAlgorithmTypeRSA8192:
 		return certcrypto.RSA8192
-	case "EC256":
+	case domain.CertificateKeyAlgorithmTypeEC256:
 		return certcrypto.EC256
-	case "EC384":
+	case domain.CertificateKeyAlgorithmTypeEC384:
 		return certcrypto.EC384
-	default:
-		return certcrypto.RSA2048
 	}
+
+	return certcrypto.RSA2048
 }
 
 // TODO: 暂时使用代理模式以兼容之前版本代码，后续重新实现此处逻辑

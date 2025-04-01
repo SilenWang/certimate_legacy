@@ -1,6 +1,7 @@
 ﻿package applicant
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,7 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/usual2970/certimate/internal/domain"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 	"github.com/usual2970/certimate/internal/repository"
 )
 
@@ -39,7 +40,7 @@ func newAcmeUser(ca, email string) (*acmeUser, error) {
 			return nil, err
 		}
 
-		keyPEM, err := certs.ConvertECPrivateKeyToPEM(key)
+		keyPEM, err := certutil.ConvertECPrivateKeyToPEM(key)
 		if err != nil {
 			return nil, err
 		}
@@ -63,7 +64,7 @@ func (u acmeUser) GetRegistration() *registration.Resource {
 }
 
 func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
-	rs, _ := certs.ParseECPrivateKeyFromPEM(u.privkey)
+	rs, _ := certutil.ParseECPrivateKeyFromPEM(u.privkey)
 	return rs
 }
 
@@ -110,14 +111,11 @@ func registerAcmeUser(client *lego.Client, sslProviderConfig *acmeSSLProviderCon
 			Kid:                  sslProviderConfig.Config.GoogleTrustServices.EabKid,
 			HmacEncoded:          sslProviderConfig.Config.GoogleTrustServices.EabHmacKey,
 		})
-
 	case sslProviderLetsEncrypt, sslProviderLetsEncryptStaging:
 		reg, err = client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
-
 	default:
 		err = fmt.Errorf("unsupported ssl provider: %s", sslProviderConfig.Provider)
 	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +127,12 @@ func registerAcmeUser(client *lego.Client, sslProviderConfig *acmeSSLProviderCon
 		return resp.Resource, nil
 	}
 
-	if err := repo.Save(sslProviderConfig.Provider, user.GetEmail(), user.getPrivateKeyPEM(), reg); err != nil {
+	if _, err := repo.Save(context.Background(), &domain.AcmeAccount{
+		CA:       sslProviderConfig.Provider,
+		Email:    user.GetEmail(),
+		Key:      user.getPrivateKeyPEM(),
+		Resource: reg,
+	}); err != nil {
 		return nil, fmt.Errorf("failed to save registration: %w", err)
 	}
 

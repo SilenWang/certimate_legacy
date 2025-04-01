@@ -2,20 +2,19 @@
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 	"strings"
 
 	xerrors "github.com/pkg/errors"
 	"github.com/qiniu/go-sdk/v7/auth"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	uploaderp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/qiniu-sslcert"
+	uploadersp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/qiniu-sslcert"
 	qiniusdk "github.com/usual2970/certimate/internal/pkg/vendors/qiniu-sdk"
 )
 
-type QiniuCDNDeployerConfig struct {
+type DeployerConfig struct {
 	// 七牛云 AccessKey。
 	AccessKey string `json:"accessKey"`
 	// 七牛云 SecretKey。
@@ -24,31 +23,23 @@ type QiniuCDNDeployerConfig struct {
 	Domain string `json:"domain"`
 }
 
-type QiniuCDNDeployer struct {
-	config      *QiniuCDNDeployerConfig
-	logger      logger.Logger
+type DeployerProvider struct {
+	config      *DeployerConfig
+	logger      *slog.Logger
 	sdkClient   *qiniusdk.Client
 	sslUploader uploader.Uploader
 }
 
-var _ deployer.Deployer = (*QiniuCDNDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *QiniuCDNDeployerConfig) (*QiniuCDNDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *QiniuCDNDeployerConfig, logger logger.Logger) (*QiniuCDNDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client := qiniusdk.NewClient(auth.New(config.AccessKey, config.SecretKey))
 
-	uploader, err := uploaderp.New(&uploaderp.QiniuSSLCertUploaderConfig{
+	uploader, err := uploadersp.NewUploader(&uploadersp.UploaderConfig{
 		AccessKey: config.AccessKey,
 		SecretKey: config.SecretKey,
 	})
@@ -56,51 +47,58 @@ func NewWithLogger(config *QiniuCDNDeployerConfig, logger logger.Logger) (*Qiniu
 		return nil, xerrors.Wrap(err, "failed to create ssl uploader")
 	}
 
-	return &QiniuCDNDeployer{
-		logger:      logger,
+	return &DeployerProvider{
 		config:      config,
+		logger:      slog.Default(),
 		sdkClient:   client,
 		sslUploader: uploader,
 	}, nil
 }
 
-func (d *QiniuCDNDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	d.sslUploader.WithLogger(logger)
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 上传证书到 CDN
 	upres, err := d.sslUploader.Upload(ctx, certPem, privkeyPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to upload certificate file")
+	} else {
+		d.logger.Info("ssl certificate uploaded", slog.Any("result", upres))
 	}
-
-	d.logger.Logt("certificate file uploaded", upres)
 
 	// "*.example.com" → ".example.com"，适配七牛云 CDN 要求的泛域名格式
 	domain := strings.TrimPrefix(d.config.Domain, "*")
 
 	// 获取域名信息
 	// REF: https://developer.qiniu.com/fusion/4246/the-domain-name
-	getDomainInfoResp, err := d.sdkClient.GetDomainInfo(domain)
+	getDomainInfoResp, err := d.sdkClient.GetDomainInfo(context.TODO(), domain)
+	d.logger.Debug("sdk request 'cdn.GetDomainInfo'", slog.String("request.domain", domain), slog.Any("response", getDomainInfoResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.GetDomainInfo'")
 	}
 
-	d.logger.Logt("已获取域名信息", getDomainInfoResp)
-
 	// 判断域名是否已启用 HTTPS。如果已启用，修改域名证书；否则，启用 HTTPS
 	// REF: https://developer.qiniu.com/fusion/4246/the-domain-name
-	if getDomainInfoResp.Https != nil && getDomainInfoResp.Https.CertID != "" {
-		modifyDomainHttpsConfResp, err := d.sdkClient.ModifyDomainHttpsConf(domain, upres.CertId, getDomainInfoResp.Https.ForceHttps, getDomainInfoResp.Https.Http2Enable)
-		if err != nil {
-			return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.ModifyDomainHttpsConf'")
-		}
-
-		d.logger.Logt("已修改域名证书", modifyDomainHttpsConfResp)
-	} else {
-		enableDomainHttpsResp, err := d.sdkClient.EnableDomainHttps(domain, upres.CertId, true, true)
+	if getDomainInfoResp.Https == nil || getDomainInfoResp.Https.CertID == "" {
+		enableDomainHttpsResp, err := d.sdkClient.EnableDomainHttps(context.TODO(), domain, upres.CertId, true, true)
+		d.logger.Debug("sdk request 'cdn.EnableDomainHttps'", slog.String("request.domain", domain), slog.String("request.certId", upres.CertId), slog.Any("response", enableDomainHttpsResp))
 		if err != nil {
 			return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.EnableDomainHttps'")
 		}
-
-		d.logger.Logt("已将域名升级为 HTTPS", enableDomainHttpsResp)
+	} else if getDomainInfoResp.Https.CertID != upres.CertId {
+		modifyDomainHttpsConfResp, err := d.sdkClient.ModifyDomainHttpsConf(context.TODO(), domain, upres.CertId, getDomainInfoResp.Https.ForceHttps, getDomainInfoResp.Https.Http2Enable)
+		d.logger.Debug("sdk request 'cdn.ModifyDomainHttpsConf'", slog.String("request.domain", domain), slog.String("request.certId", upres.CertId), slog.Any("response", modifyDomainHttpsConfResp))
+		if err != nil {
+			return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.ModifyDomainHttpsConf'")
+		}
 	}
 
 	return &deployer.DeployResult{}, nil

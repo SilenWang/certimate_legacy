@@ -2,37 +2,47 @@
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 
 	"github.com/nikoksr/notify/service/telegram"
 
 	"github.com/usual2970/certimate/internal/pkg/core/notifier"
 )
 
-type TelegramNotifierConfig struct {
+type NotifierConfig struct {
 	// Telegram API Token。
 	ApiToken string `json:"apiToken"`
 	// Telegram Chat ID。
 	ChatId int64 `json:"chatId"`
 }
 
-type TelegramNotifier struct {
-	config *TelegramNotifierConfig
+type NotifierProvider struct {
+	config *NotifierConfig
+	logger *slog.Logger
 }
 
-var _ notifier.Notifier = (*TelegramNotifier)(nil)
+var _ notifier.Notifier = (*NotifierProvider)(nil)
 
-func New(config *TelegramNotifierConfig) (*TelegramNotifier, error) {
+func NewNotifier(config *NotifierConfig) (*NotifierProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	return &TelegramNotifier{
+	return &NotifierProvider{
 		config: config,
 	}, nil
 }
 
-func (n *TelegramNotifier) Notify(ctx context.Context, subject string, message string) (res *notifier.NotifyResult, err error) {
+func (n *NotifierProvider) WithLogger(logger *slog.Logger) notifier.Notifier {
+	if logger == nil {
+		n.logger = slog.Default()
+	} else {
+		n.logger = logger
+	}
+	return n
+}
+
+func (n *NotifierProvider) Notify(ctx context.Context, subject string, message string) (res *notifier.NotifyResult, err error) {
 	srv, err := telegram.New(n.config.ApiToken)
 	if err != nil {
 		return nil, err

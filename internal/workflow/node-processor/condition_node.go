@@ -8,21 +8,17 @@ import (
 
 type conditionNode struct {
 	node *domain.WorkflowNode
-	*nodeLogger
+	*nodeProcessor
 }
 
 func NewConditionNode(node *domain.WorkflowNode) *conditionNode {
 	return &conditionNode{
-		node:       node,
-		nodeLogger: NewNodeLogger(node),
+		node:          node,
+		nodeProcessor: newNodeProcessor(node),
 	}
 }
 
-// 条件节点没有任何操作
-func (c *conditionNode) Run(ctx context.Context) error {
-	c.AddOutput(ctx,
-		c.node.Name,
-		"完成",
-	)
+func (n *conditionNode) Process(ctx context.Context) error {
+	// 此类型节点不需要执行任何操作，直接返回
 	return nil
 }

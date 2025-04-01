@@ -2,21 +2,20 @@
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"time"
+	"log/slog"
 
 	aws "github.com/aws/aws-sdk-go-v2/aws"
-	awsCfg "github.com/aws/aws-sdk-go-v2/config"
-	awsCred "github.com/aws/aws-sdk-go-v2/credentials"
-	awsAcm "github.com/aws/aws-sdk-go-v2/service/acm"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
+	awscred "github.com/aws/aws-sdk-go-v2/credentials"
+	awsacm "github.com/aws/aws-sdk-go-v2/service/acm"
 	xerrors "github.com/pkg/errors"
+	"golang.org/x/exp/slices"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 )
 
-type AWSCertificateManagerUploaderConfig struct {
+type UploaderConfig struct {
 	// AWS AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// AWS SecretAccessKey。
@@ -25,16 +24,17 @@ type AWSCertificateManagerUploaderConfig struct {
 	Region string `json:"region"`
 }
 
-type AWSCertificateManagerUploader struct {
-	config    *AWSCertificateManagerUploaderConfig
-	sdkClient *awsAcm.Client
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *awsacm.Client
 }
 
-var _ uploader.Uploader = (*AWSCertificateManagerUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *AWSCertificateManagerUploaderConfig) (*AWSCertificateManagerUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.AccessKeyId, config.SecretAccessKey, config.Region)
@@ -42,55 +42,127 @@ func New(config *AWSCertificateManagerUploaderConfig) (*AWSCertificateManagerUpl
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &AWSCertificateManagerUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *AWSCertificateManagerUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 解析证书内容
-	certX509, err := certs.ParseCertificateFromPEM(certPem)
+	certX509, err := certutil.ParseCertificateFromPEM(certPem)
 	if err != nil {
 		return nil, err
 	}
 
-	// 生成 AWS 所需的服务端证书和证书链参数
-	scertPem, _ := certs.ConvertCertificateToPEM(certX509)
+	// 生成 AWS 业务参数
+	scertPem, _ := certutil.ConvertCertificateToPEM(certX509)
 	bcertPem := certPem
 
-	// 生成新证书名（需符合 AWS 命名规则）
-	var certId, certName string
-	certName = fmt.Sprintf("certimate_%d", time.Now().UnixMilli())
+	// 获取证书列表，避免重复上传
+	// REF: https://docs.aws.amazon.com/en_us/acm/latest/APIReference/API_ListCertificates.html
+	var listCertificatesNextToken *string = nil
+	listCertificatesMaxItems := int32(1000)
+	for {
+		listCertificatesReq := &awsacm.ListCertificatesInput{
+			NextToken: listCertificatesNextToken,
+			MaxItems:  aws.Int32(listCertificatesMaxItems),
+		}
+		listCertificatesResp, err := u.sdkClient.ListCertificates(context.TODO(), listCertificatesReq)
+		u.logger.Debug("sdk request 'acm.ListCertificates'", slog.Any("request", listCertificatesReq), slog.Any("response", listCertificatesResp))
+		if err != nil {
+			return nil, xerrors.Wrap(err, "failed to execute sdk request 'acm.ListCertificates'")
+		}
+
+		for _, certSummary := range listCertificatesResp.CertificateSummaryList {
+			// 先对比证书有效期
+			if certSummary.NotBefore == nil || !certSummary.NotBefore.Equal(certX509.NotBefore) {
+				continue
+			}
+			if certSummary.NotAfter == nil || !certSummary.NotAfter.Equal(certX509.NotAfter) {
+				continue
+			}
+
+			// 再对比证书多域名
+			if !slices.Equal(certX509.DNSNames, certSummary.SubjectAlternativeNameSummaries) {
+				continue
+			}
+
+			// 最后对比证书内容
+			// REF: https://docs.aws.amazon.com/en_us/acm/latest/APIReference/API_ListTagsForCertificate.html
+			getCertificateReq := &awsacm.GetCertificateInput{
+				CertificateArn: certSummary.CertificateArn,
+			}
+			getCertificateResp, err := u.sdkClient.GetCertificate(context.TODO(), getCertificateReq)
+			if err != nil {
+				return nil, xerrors.Wrap(err, "failed to execute sdk request 'acm.GetCertificate'")
+			} else {
+				oldCertPem := aws.ToString(getCertificateResp.CertificateChain)
+				if oldCertPem == "" {
+					oldCertPem = aws.ToString(getCertificateResp.Certificate)
+				}
+
+				oldCertX509, err := certutil.ParseCertificateFromPEM(oldCertPem)
+				if err != nil {
+					continue
+				}
+
+				if !certutil.EqualCertificate(certX509, oldCertX509) {
+					continue
+				}
+			}
+
+			// 如果以上信息都一致，则视为已存在相同证书，直接返回
+			u.logger.Info("ssl certificate already exists")
+			return &uploader.UploadResult{
+				CertId: *certSummary.CertificateArn,
+			}, nil
+		}
+
+		if listCertificatesResp.NextToken == nil || len(listCertificatesResp.CertificateSummaryList) < int(listCertificatesMaxItems) {
+			break
+		} else {
+			listCertificatesNextToken = listCertificatesResp.NextToken
+		}
+	}
 
 	// 导入证书
 	// REF: https://docs.aws.amazon.com/en_us/acm/latest/APIReference/API_ImportCertificate.html
-	importCertificateReq := &awsAcm.ImportCertificateInput{
+	importCertificateReq := &awsacm.ImportCertificateInput{
 		Certificate:      ([]byte)(scertPem),
 		CertificateChain: ([]byte)(bcertPem),
 		PrivateKey:       ([]byte)(privkeyPem),
 	}
 	importCertificateResp, err := u.sdkClient.ImportCertificate(context.TODO(), importCertificateReq)
+	u.logger.Debug("sdk request 'acm.ImportCertificate'", slog.Any("request", importCertificateReq), slog.Any("response", importCertificateResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'acm.ImportCertificate'")
 	}
 
-	certId = *importCertificateResp.CertificateArn
 	return &uploader.UploadResult{
-		CertId:   certId,
-		CertName: certName,
+		CertId: *importCertificateResp.CertificateArn,
 	}, nil
 }
 
-func createSdkClient(accessKeyId, secretAccessKey, region string) (*awsAcm.Client, error) {
-	cfg, err := awsCfg.LoadDefaultConfig(context.TODO())
+func createSdkClient(accessKeyId, secretAccessKey, region string) (*awsacm.Client, error) {
+	cfg, err := awscfg.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		return nil, err
 	}
 
-	client := awsAcm.NewFromConfig(cfg, func(o *awsAcm.Options) {
+	client := awsacm.NewFromConfig(cfg, func(o *awsacm.Options) {
 		o.Region = region
-		o.Credentials = aws.NewCredentialsCache(awsCred.NewStaticCredentialsProvider(accessKeyId, secretAccessKey, ""))
+		o.Credentials = aws.NewCredentialsCache(awscred.NewStaticCredentialsProvider(accessKeyId, secretAccessKey, ""))
 	})
 	return client, nil
 }

@@ -7,16 +7,15 @@ import {
   ClockCircleOutlined as ClockCircleOutlinedIcon,
   CloseCircleOutlined as CloseCircleOutlinedIcon,
   LockOutlined as LockOutlinedIcon,
-  PauseCircleOutlined as PauseCircleOutlinedIcon,
   PlusOutlined as PlusOutlinedIcon,
   SelectOutlined as SelectOutlinedIcon,
   SendOutlined as SendOutlinedIcon,
+  StopOutlined as StopOutlinedIcon,
   SyncOutlined as SyncOutlinedIcon,
 } from "@ant-design/icons";
 import { PageHeader } from "@ant-design/pro-components";
 import { useRequest } from "ahooks";
-import type { TableProps } from "antd";
-import { Button, Card, Col, Divider, Empty, Flex, Grid, Row, Space, Statistic, Table, Tag, Typography, notification, theme } from "antd";
+import { Button, Card, Col, Divider, Empty, Flex, Grid, Row, Space, Statistic, Table, type TableProps, Tag, Typography, notification, theme } from "antd";
 import dayjs from "dayjs";
 import {
   CalendarClock as CalendarClockIcon,
@@ -89,7 +88,6 @@ const Dashboard = () => {
         const workflow = record.expand?.workflowId;
         return (
           <Typography.Link
-            type="secondary"
             ellipsis
             onClick={() => {
               if (workflow) {
@@ -129,7 +127,7 @@ const Dashboard = () => {
           );
         } else if (record.status === WORKFLOW_RUN_STATUSES.CANCELED) {
           return (
-            <Tag icon={<PauseCircleOutlinedIcon />} color="warning">
+            <Tag icon={<StopOutlinedIcon />} color="warning">
               {t("workflow_run.props.status.canceled")}
             </Tag>
           );
@@ -167,9 +165,9 @@ const Dashboard = () => {
       align: "end",
       width: 120,
       render: (_, record) => (
-        <Button.Group>
+        <Space.Compact>
           <WorkflowRunDetailDrawer data={record} trigger={<Button color="primary" icon={<SelectOutlinedIcon />} variant="text" />} />
-        </Button.Group>
+        </Space.Compact>
       ),
     },
   ];
@@ -178,7 +176,7 @@ const Dashboard = () => {
     () => {
       return listWorkflowRuns({
         page: 1,
-        perPage: 5,
+        perPage: 9,
         expand: true,
       });
     },
@@ -277,7 +275,7 @@ const Dashboard = () => {
             </Button>
           </Space>
         </Card>
-        <Card className="flex-1" title={t("dashboard.latest_workflow_run")}>
+        <Card className="flex-1" title={t("dashboard.latest_workflow_runs")}>
           <Table<WorkflowRunModel>
             columns={tableColumns}
             dataSource={tableData}
@@ -286,8 +284,9 @@ const Dashboard = () => {
               emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />,
             }}
             pagination={false}
-            rowKey={(record: WorkflowRunModel) => record.id}
+            rowKey={(record) => record.id}
             scroll={{ x: "max(100%, 960px)" }}
+            size="small"
           />
         </Card>
       </Flex>
@@ -311,7 +310,7 @@ const StatisticCard = ({
   onClick?: () => void;
 }) => {
   return (
-    <Card className="size-full overflow-hidden" bordered={false} hoverable loading={loading} onClick={onClick}>
+    <Card className="size-full overflow-hidden" hoverable loading={loading} variant="borderless" onClick={onClick}>
       <Space size="middle">
         {icon}
         <Statistic

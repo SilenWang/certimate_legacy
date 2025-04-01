@@ -15,25 +15,48 @@ import { type WorkflowNode, type WorkflowNodeConfigForDeploy } from "@/domain/wo
 import { useAntdForm, useAntdFormName, useZustandShallowSelector } from "@/hooks";
 import { useWorkflowStore } from "@/stores/workflow";
 
+import DeployNodeConfigForm1PanelConsoleConfig from "./DeployNodeConfigForm1PanelConsoleConfig";
+import DeployNodeConfigForm1PanelSiteConfig from "./DeployNodeConfigForm1PanelSiteConfig";
 import DeployNodeConfigFormAliyunALBConfig from "./DeployNodeConfigFormAliyunALBConfig";
+import DeployNodeConfigFormAliyunCASConfig from "./DeployNodeConfigFormAliyunCASConfig";
+import DeployNodeConfigFormAliyunCASDeployConfig from "./DeployNodeConfigFormAliyunCASDeployConfig";
 import DeployNodeConfigFormAliyunCDNConfig from "./DeployNodeConfigFormAliyunCDNConfig";
 import DeployNodeConfigFormAliyunCLBConfig from "./DeployNodeConfigFormAliyunCLBConfig";
 import DeployNodeConfigFormAliyunDCDNConfig from "./DeployNodeConfigFormAliyunDCDNConfig";
+import DeployNodeConfigFormAliyunESAConfig from "./DeployNodeConfigFormAliyunESAConfig";
+import DeployNodeConfigFormAliyunFCConfig from "./DeployNodeConfigFormAliyunFCConfig";
 import DeployNodeConfigFormAliyunLiveConfig from "./DeployNodeConfigFormAliyunLiveConfig";
 import DeployNodeConfigFormAliyunNLBConfig from "./DeployNodeConfigFormAliyunNLBConfig";
 import DeployNodeConfigFormAliyunOSSConfig from "./DeployNodeConfigFormAliyunOSSConfig";
+import DeployNodeConfigFormAliyunVODConfig from "./DeployNodeConfigFormAliyunVODConfig";
 import DeployNodeConfigFormAliyunWAFConfig from "./DeployNodeConfigFormAliyunWAFConfig";
+import DeployNodeConfigFormAWSACMConfig from "./DeployNodeConfigFormAWSACMConfig";
 import DeployNodeConfigFormAWSCloudFrontConfig from "./DeployNodeConfigFormAWSCloudFrontConfig";
+import DeployNodeConfigFormAzureKeyVaultConfig from "./DeployNodeConfigFormAzureKeyVaultConfig";
+import DeployNodeConfigFormBaiduCloudAppBLBConfig from "./DeployNodeConfigFormBaiduCloudAppBLBConfig";
+import DeployNodeConfigFormBaiduCloudBLBConfig from "./DeployNodeConfigFormBaiduCloudBLBConfig";
 import DeployNodeConfigFormBaiduCloudCDNConfig from "./DeployNodeConfigFormBaiduCloudCDNConfig";
+import DeployNodeConfigFormBaishanCDNConfig from "./DeployNodeConfigFormBaishanCDNConfig";
+import DeployNodeConfigFormBaotaPanelConsoleConfig from "./DeployNodeConfigFormBaotaPanelConsoleConfig";
+import DeployNodeConfigFormBaotaPanelSiteConfig from "./DeployNodeConfigFormBaotaPanelSiteConfig";
 import DeployNodeConfigFormBytePlusCDNConfig from "./DeployNodeConfigFormBytePlusCDNConfig";
+import DeployNodeConfigFormCdnflyConfig from "./DeployNodeConfigFormCdnflyConfig";
 import DeployNodeConfigFormDogeCloudCDNConfig from "./DeployNodeConfigFormDogeCloudCDNConfig";
 import DeployNodeConfigFormEdgioApplicationsConfig from "./DeployNodeConfigFormEdgioApplicationsConfig";
+import DeployNodeConfigFormGcoreCDNConfig from "./DeployNodeConfigFormGcoreCDNConfig";
 import DeployNodeConfigFormHuaweiCloudCDNConfig from "./DeployNodeConfigFormHuaweiCloudCDNConfig";
 import DeployNodeConfigFormHuaweiCloudELBConfig from "./DeployNodeConfigFormHuaweiCloudELBConfig";
+import DeployNodeConfigFormHuaweiCloudWAFConfig from "./DeployNodeConfigFormHuaweiCloudWAFConfig";
+import DeployNodeConfigFormJDCloudALBConfig from "./DeployNodeConfigFormJDCloudALBConfig";
+import DeployNodeConfigFormJDCloudCDNConfig from "./DeployNodeConfigFormJDCloudCDNConfig";
+import DeployNodeConfigFormJDCloudLiveConfig from "./DeployNodeConfigFormJDCloudLiveConfig";
+import DeployNodeConfigFormJDCloudVODConfig from "./DeployNodeConfigFormJDCloudVODConfig";
 import DeployNodeConfigFormKubernetesSecretConfig from "./DeployNodeConfigFormKubernetesSecretConfig";
 import DeployNodeConfigFormLocalConfig from "./DeployNodeConfigFormLocalConfig";
 import DeployNodeConfigFormQiniuCDNConfig from "./DeployNodeConfigFormQiniuCDNConfig";
+import DeployNodeConfigFormQiniuKodoConfig from "./DeployNodeConfigFormQiniuKodoConfig";
 import DeployNodeConfigFormQiniuPiliConfig from "./DeployNodeConfigFormQiniuPiliConfig";
+import DeployNodeConfigFormSafeLineConfig from "./DeployNodeConfigFormSafeLineConfig";
 import DeployNodeConfigFormSSHConfig from "./DeployNodeConfigFormSSHConfig.tsx";
 import DeployNodeConfigFormTencentCloudCDNConfig from "./DeployNodeConfigFormTencentCloudCDNConfig.tsx";
 import DeployNodeConfigFormTencentCloudCLBConfig from "./DeployNodeConfigFormTencentCloudCLBConfig.tsx";
@@ -41,11 +64,20 @@ import DeployNodeConfigFormTencentCloudCOSConfig from "./DeployNodeConfigFormTen
 import DeployNodeConfigFormTencentCloudCSSConfig from "./DeployNodeConfigFormTencentCloudCSSConfig.tsx";
 import DeployNodeConfigFormTencentCloudECDNConfig from "./DeployNodeConfigFormTencentCloudECDNConfig.tsx";
 import DeployNodeConfigFormTencentCloudEOConfig from "./DeployNodeConfigFormTencentCloudEOConfig.tsx";
+import DeployNodeConfigFormTencentCloudSCFConfig from "./DeployNodeConfigFormTencentCloudSCFConfig";
+import DeployNodeConfigFormTencentCloudSSLDeployConfig from "./DeployNodeConfigFormTencentCloudSSLDeployConfig";
+import DeployNodeConfigFormTencentCloudVODConfig from "./DeployNodeConfigFormTencentCloudVODConfig";
+import DeployNodeConfigFormTencentCloudWAFConfig from "./DeployNodeConfigFormTencentCloudWAFConfig";
 import DeployNodeConfigFormUCloudUCDNConfig from "./DeployNodeConfigFormUCloudUCDNConfig.tsx";
 import DeployNodeConfigFormUCloudUS3Config from "./DeployNodeConfigFormUCloudUS3Config.tsx";
+import DeployNodeConfigFormUpyunCDNConfig from "./DeployNodeConfigFormUpyunCDNConfig.tsx";
+import DeployNodeConfigFormUpyunFileConfig from "./DeployNodeConfigFormUpyunFileConfig.tsx";
+import DeployNodeConfigFormVolcEngineALBConfig from "./DeployNodeConfigFormVolcEngineALBConfig.tsx";
 import DeployNodeConfigFormVolcEngineCDNConfig from "./DeployNodeConfigFormVolcEngineCDNConfig.tsx";
+import DeployNodeConfigFormVolcEngineCertCenterConfig from "./DeployNodeConfigFormVolcEngineCertCenterConfig.tsx";
 import DeployNodeConfigFormVolcEngineCLBConfig from "./DeployNodeConfigFormVolcEngineCLBConfig.tsx";
 import DeployNodeConfigFormVolcEngineDCDNConfig from "./DeployNodeConfigFormVolcEngineDCDNConfig.tsx";
+import DeployNodeConfigFormVolcEngineImageXConfig from "./DeployNodeConfigFormVolcEngineImageXConfig.tsx";
 import DeployNodeConfigFormVolcEngineLiveConfig from "./DeployNodeConfigFormVolcEngineLiveConfig.tsx";
 import DeployNodeConfigFormVolcEngineTOSConfig from "./DeployNodeConfigFormVolcEngineTOSConfig.tsx";
 import DeployNodeConfigFormWebhookConfig from "./DeployNodeConfigFormWebhookConfig.tsx";
@@ -93,10 +125,9 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
       provider: z.string({ message: t("workflow_node.deploy.form.provider.placeholder") }).nonempty(t("workflow_node.deploy.form.provider.placeholder")),
       providerAccessId: z
         .string({ message: t("workflow_node.deploy.form.provider_access.placeholder") })
-        .nonempty(t("workflow_node.deploy.form.provider_access.placeholder"))
-        .refine(() => !!formInst.getFieldValue("provider"), t("workflow_node.deploy.form.provider.placeholder")),
+        .nonempty(t("workflow_node.deploy.form.provider_access.placeholder")),
       providerConfig: z.any(),
-      skipOnLastSucceeded: z.boolean(),
+      skipOnLastSucceeded: z.boolean().nullish(),
     });
     const formRule = createSchemaFieldRule(formSchema);
     const { form: formInst, formProps } = useAntdForm({
@@ -121,44 +152,90 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
         NOTICE: If you add new child component, please keep ASCII order.
        */
       switch (fieldProvider) {
+        case DEPLOY_PROVIDERS["1PANEL_CONSOLE"]:
+          return <DeployNodeConfigForm1PanelConsoleConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS["1PANEL_SITE"]:
+          return <DeployNodeConfigForm1PanelSiteConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_ALB:
           return <DeployNodeConfigFormAliyunALBConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.ALIYUN_CAS:
+          return <DeployNodeConfigFormAliyunCASConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.ALIYUN_CAS_DEPLOY:
+          return <DeployNodeConfigFormAliyunCASDeployConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_CLB:
           return <DeployNodeConfigFormAliyunCLBConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_CDN:
           return <DeployNodeConfigFormAliyunCDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_DCDN:
           return <DeployNodeConfigFormAliyunDCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.ALIYUN_ESA:
+          return <DeployNodeConfigFormAliyunESAConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.ALIYUN_FC:
+          return <DeployNodeConfigFormAliyunFCConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_LIVE:
           return <DeployNodeConfigFormAliyunLiveConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_NLB:
           return <DeployNodeConfigFormAliyunNLBConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_OSS:
           return <DeployNodeConfigFormAliyunOSSConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.ALIYUN_VOD:
+          return <DeployNodeConfigFormAliyunVODConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.ALIYUN_WAF:
           return <DeployNodeConfigFormAliyunWAFConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.AWS_ACM:
+          return <DeployNodeConfigFormAWSACMConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.AWS_CLOUDFRONT:
           return <DeployNodeConfigFormAWSCloudFrontConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.AZURE_KEYVAULT:
+          return <DeployNodeConfigFormAzureKeyVaultConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.BAIDUCLOUD_APPBLB:
+          return <DeployNodeConfigFormBaiduCloudAppBLBConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.BAIDUCLOUD_BLB:
+          return <DeployNodeConfigFormBaiduCloudBLBConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.BAIDUCLOUD_CDN:
           return <DeployNodeConfigFormBaiduCloudCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.BAISHAN_CDN:
+          return <DeployNodeConfigFormBaishanCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.BAOTAPANEL_CONSOLE:
+          return <DeployNodeConfigFormBaotaPanelConsoleConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.BAOTAPANEL_SITE:
+          return <DeployNodeConfigFormBaotaPanelSiteConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.BYTEPLUS_CDN:
           return <DeployNodeConfigFormBytePlusCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.CDNFLY:
+          return <DeployNodeConfigFormCdnflyConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.DOGECLOUD_CDN:
           return <DeployNodeConfigFormDogeCloudCDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.EDGIO_APPLICATIONS:
           return <DeployNodeConfigFormEdgioApplicationsConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.GCORE_CDN:
+          return <DeployNodeConfigFormGcoreCDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.HUAWEICLOUD_CDN:
           return <DeployNodeConfigFormHuaweiCloudCDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.HUAWEICLOUD_ELB:
           return <DeployNodeConfigFormHuaweiCloudELBConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.HUAWEICLOUD_WAF:
+          return <DeployNodeConfigFormHuaweiCloudWAFConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.JDCLOUD_ALB:
+          return <DeployNodeConfigFormJDCloudALBConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.JDCLOUD_CDN:
+          return <DeployNodeConfigFormJDCloudCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.JDCLOUD_LIVE:
+          return <DeployNodeConfigFormJDCloudLiveConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.JDCLOUD_VOD:
+          return <DeployNodeConfigFormJDCloudVODConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.KUBERNETES_SECRET:
           return <DeployNodeConfigFormKubernetesSecretConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.LOCAL:
           return <DeployNodeConfigFormLocalConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.QINIU_CDN:
           return <DeployNodeConfigFormQiniuCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.QINIU_KODO:
+          return <DeployNodeConfigFormQiniuKodoConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.QINIU_PILI:
           return <DeployNodeConfigFormQiniuPiliConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.SAFELINE:
+          return <DeployNodeConfigFormSafeLineConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.SSH:
           return <DeployNodeConfigFormSSHConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.TENCENTCLOUD_CDN:
@@ -173,16 +250,34 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
           return <DeployNodeConfigFormTencentCloudECDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.TENCENTCLOUD_EO:
           return <DeployNodeConfigFormTencentCloudEOConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.TENCENTCLOUD_SCF:
+          return <DeployNodeConfigFormTencentCloudSCFConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.TENCENTCLOUD_SSL_DEPLOY:
+          return <DeployNodeConfigFormTencentCloudSSLDeployConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.TENCENTCLOUD_VOD:
+          return <DeployNodeConfigFormTencentCloudVODConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.TENCENTCLOUD_WAF:
+          return <DeployNodeConfigFormTencentCloudWAFConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.UCLOUD_UCDN:
           return <DeployNodeConfigFormUCloudUCDNConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.UCLOUD_US3:
           return <DeployNodeConfigFormUCloudUS3Config {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.UPYUN_CDN:
+          return <DeployNodeConfigFormUpyunCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.UPYUN_FILE:
+          return <DeployNodeConfigFormUpyunFileConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.VOLCENGINE_ALB:
+          return <DeployNodeConfigFormVolcEngineALBConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.VOLCENGINE_CDN:
           return <DeployNodeConfigFormVolcEngineCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.VOLCENGINE_CERTCENTER:
+          return <DeployNodeConfigFormVolcEngineCertCenterConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.VOLCENGINE_CLB:
           return <DeployNodeConfigFormVolcEngineCLBConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.VOLCENGINE_DCDN:
           return <DeployNodeConfigFormVolcEngineDCDNConfig {...nestedFormProps} />;
+        case DEPLOY_PROVIDERS.VOLCENGINE_IMAGEX:
+          return <DeployNodeConfigFormVolcEngineImageXConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.VOLCENGINE_LIVE:
           return <DeployNodeConfigFormVolcEngineLiveConfig {...nestedFormProps} />;
         case DEPLOY_PROVIDERS.VOLCENGINE_TOS:
@@ -200,7 +295,6 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
     const handleProviderSelect = (value: string) => {
       if (fieldProvider === value) return;
 
-      // TODO: 暂时不支持切换部署目标，需后端调整，否则之前若存在部署结果输出就不会再部署
       // 切换部署目标时重置表单，避免其他部署目标的配置字段影响当前部署目标
       if (initialValues?.provider === value) {
         formInst.resetFields();
@@ -208,13 +302,13 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
         const oldValues = formInst.getFieldsValue();
         const newValues: Record<string, unknown> = {};
         for (const key in oldValues) {
-          if (key === "provider" || key === "providerAccessId" || key === "certificate") {
+          if (key === "provider" || key === "providerAccessId" || key === "certificate" || key === "skipOnLastSucceeded") {
             newValues[key] = oldValues[key];
           } else {
             newValues[key] = undefined;
           }
         }
-        (formInst as FormInstance).setFieldsValue(newValues);
+        formInst.setFieldsValue(newValues);
 
         if (deployProvidersMap.get(fieldProvider)?.provider !== deployProvidersMap.get(value)?.provider) {
           formInst.setFieldValue("providerAccessId", undefined);
@@ -261,7 +355,7 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
         <Form className={className} style={style} {...formProps} disabled={disabled} layout="vertical" scrollToFirstError onValuesChange={handleFormChange}>
           <Show
             when={!!fieldProvider}
-            fallback={<DeployProviderPicker placeholder={t("workflow_node.deploy.search.provider.placeholder")} onSelect={handleProviderPick} />}
+            fallback={<DeployProviderPicker autoFocus placeholder={t("workflow_node.deploy.search.provider.placeholder")} onSelect={handleProviderPick} />}
           >
             <Form.Item name="provider" label={t("workflow_node.deploy.form.provider.label")} rules={[formRule]}>
               <DeployProviderSelect
@@ -296,7 +390,7 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
                       }
                       afterSubmit={(record) => {
                         const provider = accessProvidersMap.get(record.provider);
-                        if (ACCESS_USAGES.ALL === provider?.usage || ACCESS_USAGES.DEPLOY === provider?.usage) {
+                        if (provider?.usages?.includes(ACCESS_USAGES.DEPLOY)) {
                           formInst.setFieldValue("providerAccessId", record.id);
                         }
                       }}
@@ -306,15 +400,15 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
               </label>
               <Form.Item name="providerAccessId" rules={[formRule]}>
                 <AccessSelect
-                  placeholder={t("workflow_node.deploy.form.provider_access.placeholder")}
                   filter={(record) => {
                     if (fieldProvider) {
                       return deployProvidersMap.get(fieldProvider)?.provider === record.provider;
                     }
 
                     const provider = accessProvidersMap.get(record.provider);
-                    return ACCESS_USAGES.ALL === provider?.usage || ACCESS_USAGES.APPLY === provider?.usage;
+                    return !!provider?.usages?.includes(ACCESS_USAGES.DEPLOY);
                   }}
+                  placeholder={t("workflow_node.deploy.form.provider_access.placeholder")}
                 />
               </Form.Item>
             </Form.Item>
@@ -352,7 +446,7 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
           </Show>
         </Form>
 
-        <Show when={!!fieldProvider}>
+        <Show when={!!nestedFormEl}>
           <Divider className="my-1">
             <Typography.Text className="text-xs font-normal" type="secondary">
               {t("workflow_node.deploy.form.params_config.label")}
@@ -360,7 +454,9 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
           </Divider>
 
           {nestedFormEl}
+        </Show>
 
+        <Show when={!!fieldProvider}>
           <Divider className="my-1">
             <Typography.Text className="text-xs font-normal" type="secondary">
               {t("workflow_node.deploy.form.strategy_config.label")}
@@ -373,8 +469,8 @@ const DeployNodeConfigForm = forwardRef<DeployNodeConfigFormInstance, DeployNode
                 <div>{t("workflow_node.deploy.form.skip_on_last_succeeded.prefix")}</div>
                 <Form.Item name="skipOnLastSucceeded" noStyle rules={[formRule]}>
                   <Switch
-                    checkedChildren={t("workflow_node.deploy.form.skip_on_last_succeeded.enabled.on")}
-                    unCheckedChildren={t("workflow_node.deploy.form.skip_on_last_succeeded.enabled.off")}
+                    checkedChildren={t("workflow_node.deploy.form.skip_on_last_succeeded.switch.on")}
+                    unCheckedChildren={t("workflow_node.deploy.form.skip_on_last_succeeded.switch.off")}
                   />
                 </Form.Item>
                 <div>{t("workflow_node.deploy.form.skip_on_last_succeeded.suffix")}</div>

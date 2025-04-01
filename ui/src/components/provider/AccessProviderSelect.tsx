@@ -1,22 +1,32 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Select, type SelectProps, Space, Tag, Typography } from "antd";
 
-import { ACCESS_USAGES, accessProvidersMap } from "@/domain/provider";
+import { ACCESS_USAGES, type AccessProvider, accessProvidersMap } from "@/domain/provider";
 
 export type AccessProviderSelectProps = Omit<
   SelectProps,
   "filterOption" | "filterSort" | "labelRender" | "options" | "optionFilterProp" | "optionLabelProp" | "optionRender"
->;
+> & {
+  filter?: (record: AccessProvider) => boolean;
+};
 
-const AccessProviderSelect = (props: AccessProviderSelectProps) => {
+const AccessProviderSelect = ({ filter, ...props }: AccessProviderSelectProps) => {
   const { t } = useTranslation();
 
-  const options = Array.from(accessProvidersMap.values()).map((item) => ({
-    key: item.type,
-    value: item.type,
-    label: t(item.name),
-  }));
+  const [options, setOptions] = useState<Array<{ key: string; value: string; label: string; data: AccessProvider }>>([]);
+  useEffect(() => {
+    const allItems = Array.from(accessProvidersMap.values());
+    const filteredItems = filter != null ? allItems.filter(filter) : allItems;
+    setOptions(
+      filteredItems.map((item) => ({
+        key: item.type,
+        value: item.type,
+        label: t(item.name),
+        data: item,
+      }))
+    );
+  }, [filter]);
 
   const renderOption = (key: string) => {
     const provider = accessProvidersMap.get(key);
@@ -29,19 +39,13 @@ const AccessProviderSelect = (props: AccessProviderSelectProps) => {
           </Typography.Text>
         </Space>
         <div>
-          {provider?.usage === ACCESS_USAGES.APPLY && (
+          {provider?.usages?.includes(ACCESS_USAGES.APPLY) && (
             <>
               <Tag color="orange">{t("access.props.provider.usage.dns")}</Tag>
             </>
           )}
-          {provider?.usage === ACCESS_USAGES.DEPLOY && (
+          {provider?.usages?.includes(ACCESS_USAGES.DEPLOY) && (
             <>
-              <Tag color="blue">{t("access.props.provider.usage.host")}</Tag>
-            </>
-          )}
-          {provider?.usage === ACCESS_USAGES.ALL && (
-            <>
-              <Tag color="orange">{t("access.props.provider.usage.dns")}</Tag>
               <Tag color="blue">{t("access.props.provider.usage.host")}</Tag>
             </>
           )}
@@ -53,12 +57,18 @@ const AccessProviderSelect = (props: AccessProviderSelectProps) => {
   return (
     <Select
       {...props}
+      filterOption={(inputValue, option) => {
+        if (!option) return false;
+
+        const value = inputValue.toLowerCase();
+        return option.value.toLowerCase().includes(value) || option.label.toLowerCase().includes(value);
+      }}
       labelRender={({ label, value }) => {
-        if (label) {
-          return renderOption(value as string);
+        if (!label) {
+          return <Typography.Text type="secondary">{props.placeholder}</Typography.Text>;
         }
 
-        return <Typography.Text type="secondary">{props.placeholder}</Typography.Text>;
+        return renderOption(value as string);
       }}
       options={options}
       optionFilterProp={undefined}

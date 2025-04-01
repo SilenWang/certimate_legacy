@@ -122,6 +122,7 @@ export type WorkflowNodeConfigForStart = {
 export type WorkflowNodeConfigForApply = {
   domains: string;
   contactEmail: string;
+  challengeType: string;
   provider: string;
   providerAccessId: string;
   providerConfig?: Record<string, unknown>;
@@ -172,7 +173,12 @@ export type WorkflowNodeIOValueSelector = {
   id: string;
   name: string;
 };
+
 // #endregion
+
+const isBranchLike = (node: WorkflowNode) => {
+  return node.type === WorkflowNodeType.Branch || node.type === WorkflowNodeType.ExecuteResultBranch;
+};
 
 type InitWorkflowOptions = {
   template?: "standard";
@@ -190,6 +196,9 @@ export const initWorkflow = (options: InitWorkflowOptions = {}): WorkflowModel =
     current.next = newNode(WorkflowNodeType.Deploy, {});
 
     current = current.next;
+    current.next = newNode(WorkflowNodeType.ExecuteResultBranch, {});
+
+    current = current.next!.branches![1];
     current.next = newNode(WorkflowNodeType.Notify, {});
   }
 
@@ -264,36 +273,53 @@ export const updateNode = (node: WorkflowNode, targetNode: WorkflowNode) => {
     let current = draft;
     while (current) {
       if (current.id === targetNode.id) {
-        Object.assign(current, targetNode);
+        // Object.assign(current, targetNode);
+        // TODO: 暂时这么处理，避免 #485 #489，后续再优化
+        current.type = targetNode.type;
+        current.name = targetNode.name;
+        current.config = targetNode.config;
+        current.inputs = targetNode.inputs;
+        current.outputs = targetNode.outputs;
+        current.next = targetNode.next;
+        current.branches = targetNode.branches;
+        current.validated = targetNode.validated;
         break;
       }
-      if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-        current.branches = current.branches!.map((branch) => updateNode(branch, targetNode));
+
+      if (isBranchLike(current)) {
+        current.branches ??= [];
+        current.branches = current.branches.map((branch) => updateNode(branch, targetNode));
       }
+
       current = current.next as WorkflowNode;
     }
+
     return draft;
   });
 };
 
-export const addNode = (node: WorkflowNode, preId: string, targetNode: WorkflowNode) => {
+export const addNode = (node: WorkflowNode, previousNodeId: string, targetNode: WorkflowNode) => {
   return produce(node, (draft) => {
     let current = draft;
     while (current) {
-      if (current.id === preId && targetNode.type !== WorkflowNodeType.Branch && targetNode.type !== WorkflowNodeType.ExecuteResultBranch) {
+      if (current.id === previousNodeId && !isBranchLike(targetNode)) {
         targetNode.next = current.next;
         current.next = targetNode;
         break;
-      } else if (current.id === preId && (targetNode.type === WorkflowNodeType.Branch || targetNode.type === WorkflowNodeType.ExecuteResultBranch)) {
+      } else if (current.id === previousNodeId && isBranchLike(targetNode)) {
         targetNode.branches![0].next = current.next;
         current.next = targetNode;
         break;
       }
-      if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-        current.branches = current.branches!.map((branch) => addNode(branch, preId, targetNode));
+
+      if (isBranchLike(current)) {
+        current.branches ??= [];
+        current.branches = current.branches.map((branch) => addNode(branch, previousNodeId, targetNode));
       }
+
       current = current.next as WorkflowNode;
     }
+
     return draft;
   });
 };
@@ -306,18 +332,24 @@ export const addBranch = (node: WorkflowNode, branchNodeId: string) => {
         if (current.type !== WorkflowNodeType.Branch) {
           return draft;
         }
-        current.branches!.push(
+
+        current.branches ??= [];
+        current.branches.push(
           newNode(WorkflowNodeType.Condition, {
-            branchIndex: current.branches!.length,
+            branchIndex: current.branches.length,
           })
         );
         break;
       }
-      if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-        current.branches = current.branches!.map((branch) => addBranch(branch, branchNodeId));
+
+      if (isBranchLike(current)) {
+        current.branches ??= [];
+        current.branches = current.branches.map((branch) => addBranch(branch, branchNodeId));
       }
+
       current = current.next as WorkflowNode;
     }
+
     return draft;
   });
 };
@@ -330,11 +362,15 @@ export const removeNode = (node: WorkflowNode, targetNodeId: string) => {
         current.next = current.next.next;
         break;
       }
-      if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-        current.branches = current.branches!.map((branch) => removeNode(branch, targetNodeId));
+
+      if (isBranchLike(current)) {
+        current.branches ??= [];
+        current.branches = current.branches.map((branch) => removeNode(branch, targetNodeId));
       }
+
       current = current.next as WorkflowNode;
     }
+
     return draft;
   });
 };
@@ -350,14 +386,16 @@ export const removeBranch = (node: WorkflowNode, branchNodeId: string, branchInd
     };
     while (current && last) {
       if (current.id === branchNodeId) {
-        if (current.type !== WorkflowNodeType.Branch && current.type !== WorkflowNodeType.ExecuteResultBranch) {
+        if (!isBranchLike(current)) {
           return draft;
         }
-        current.branches!.splice(branchIndex, 1);
+
+        current.branches ??= [];
+        current.branches.splice(branchIndex, 1);
 
         // 如果仅剩一个分支，删除分支节点，将分支节点的下一个节点挂载到当前节点
-        if (current.branches!.length === 1) {
-          const branch = current.branches![0];
+        if (current.branches.length === 1) {
+          const branch = current.branches[0];
           if (branch.next) {
             last.next = branch.next;
             let lastNode: WorkflowNode | undefined = branch.next;
@@ -372,31 +410,30 @@ export const removeBranch = (node: WorkflowNode, branchNodeId: string, branchInd
 
         break;
       }
-      if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-        current.branches = current.branches!.map((branch) => removeBranch(branch, branchNodeId, branchIndex));
+
+      if (isBranchLike(current)) {
+        current.branches ??= [];
+        current.branches = current.branches.map((branch) => removeBranch(branch, branchNodeId, branchIndex));
       }
+
       current = current.next as WorkflowNode;
       last = last.next;
     }
+
     return draft;
   });
 };
 
-// 1 个分支的节点，不应该能获取到相邻分支上节点的输出
-export const getWorkflowOutputBeforeId = (node: WorkflowNode, id: string, type: string): WorkflowNode[] => {
-  const output: WorkflowNode[] = [];
+export const getOutputBeforeNodeId = (root: WorkflowNode, nodeId: string, type: string): WorkflowNode[] => {
+  // 某个分支的节点，不应该能获取到相邻分支上节点的输出
+  const outputs: WorkflowNode[] = [];
 
   const traverse = (current: WorkflowNode, output: WorkflowNode[]) => {
     if (!current) {
       return false;
     }
-    if (current.id === id) {
+    if (current.id === nodeId) {
       return true;
-    }
-
-    // 如果当前节点是execute_failure,清除execute_result_branch节点前一个节点的输出
-    if (current.type === WorkflowNodeType.ExecuteFailure) {
-      output.splice(output.length - 1);
     }
 
     if (current.type !== WorkflowNodeType.Branch && current.outputs && current.outputs.some((io) => io.type === type)) {
@@ -406,9 +443,14 @@ export const getWorkflowOutputBeforeId = (node: WorkflowNode, id: string, type: 
       });
     }
 
-    if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
-      const currentLength = output.length;
+    if (isBranchLike(current)) {
+      let currentLength = output.length;
+      const latestOutput = output.length > 0 ? output[output.length - 1] : null;
       for (const branch of current.branches!) {
+        if (branch.type === WorkflowNodeType.ExecuteFailure) {
+          output.splice(output.length - 1);
+          currentLength -= 1;
+        }
         if (traverse(branch, output)) {
           return true;
         }
@@ -416,20 +458,24 @@ export const getWorkflowOutputBeforeId = (node: WorkflowNode, id: string, type: 
         if (output.length > currentLength) {
           output.splice(currentLength);
         }
+        if (latestOutput && branch.type === WorkflowNodeType.ExecuteFailure) {
+          output.push(latestOutput);
+          currentLength += 1;
+        }
       }
     }
 
     return traverse(current.next as WorkflowNode, output);
   };
 
-  traverse(node, output);
-  return output;
+  traverse(root, outputs);
+  return outputs;
 };
 
 export const isAllNodesValidated = (node: WorkflowNode): boolean => {
   let current = node as typeof node | undefined;
   while (current) {
-    if (current.type === WorkflowNodeType.Branch || current.type === WorkflowNodeType.ExecuteResultBranch) {
+    if (isBranchLike(current)) {
       for (const branch of current.branches!) {
         if (!isAllNodesValidated(branch)) {
           return false;
@@ -445,22 +491,4 @@ export const isAllNodesValidated = (node: WorkflowNode): boolean => {
   }
 
   return true;
-};
-
-/**
- * @deprecated
- */
-export const getExecuteMethod = (node: WorkflowNode): { trigger: string; triggerCron: string } => {
-  if (node.type === WorkflowNodeType.Start) {
-    const config = node.config as WorkflowNodeConfigForStart;
-    return {
-      trigger: config.trigger ?? "",
-      triggerCron: config.triggerCron ?? "",
-    };
-  } else {
-    return {
-      trigger: "",
-      triggerCron: "",
-    };
-  }
 };

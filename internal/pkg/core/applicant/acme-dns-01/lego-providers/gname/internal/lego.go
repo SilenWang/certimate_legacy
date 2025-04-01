@@ -37,13 +37,13 @@ type Config struct {
 }
 
 type DNSProvider struct {
-	client *gnamesdk.GnameClient
+	client *gnamesdk.Client
 	config *Config
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		TTL:                env.GetOrDefaultInt(EnvTTL, dns01.DefaultTTL),
+		TTL:                env.GetOrDefaultInt(EnvTTL, 300),
 		PropagationTimeout: env.GetOrDefaultSecond(EnvPropagationTimeout, 2*time.Minute),
 		PollingInterval:    env.GetOrDefaultSecond(EnvPollingInterval, dns01.DefaultPollingInterval),
 		HTTPTimeout:        env.GetOrDefaultSecond(EnvHTTPTimeout, 30*time.Second),
@@ -68,7 +68,7 @@ func NewDNSProviderConfig(config *Config) (*DNSProvider, error) {
 		return nil, errors.New("gname: the configuration of the DNS provider is nil")
 	}
 
-	client := gnamesdk.NewGnameClient(config.AppID, config.AppKey).
+	client := gnamesdk.NewClient(config.AppID, config.AppKey).
 		WithTimeout(config.HTTPTimeout)
 
 	return &DNSProvider{
@@ -80,17 +80,17 @@ func NewDNSProviderConfig(config *Config) (*DNSProvider, error) {
 func (d *DNSProvider) Present(domain, token, keyAuth string) error {
 	info := dns01.GetChallengeInfo(domain, keyAuth)
 
-	zoneName, err := dns01.FindZoneByFqdn(info.EffectiveFQDN)
+	authZone, err := dns01.FindZoneByFqdn(info.EffectiveFQDN)
 	if err != nil {
 		return fmt.Errorf("gname: %w", err)
 	}
 
-	subDomain, err := dns01.ExtractSubDomain(info.EffectiveFQDN, zoneName)
+	subDomain, err := dns01.ExtractSubDomain(info.EffectiveFQDN, authZone)
 	if err != nil {
 		return fmt.Errorf("gname: %w", err)
 	}
 
-	if err := d.addOrUpdateDNSRecord(domain, subDomain, info.Value); err != nil {
+	if err := d.addOrUpdateDNSRecord(dns01.UnFqdn(authZone), subDomain, info.Value); err != nil {
 		return fmt.Errorf("gname: %w", err)
 	}
 
@@ -98,10 +98,19 @@ func (d *DNSProvider) Present(domain, token, keyAuth string) error {
 }
 
 func (d *DNSProvider) CleanUp(domain, token, keyAuth string) error {
-	fqdn, value := dns01.GetRecord(domain, keyAuth)
-	subDomain := dns01.UnFqdn(fqdn)
+	info := dns01.GetChallengeInfo(domain, keyAuth)
 
-	if err := d.removeDNSRecord(domain, subDomain, value); err != nil {
+	authZone, err := dns01.FindZoneByFqdn(info.EffectiveFQDN)
+	if err != nil {
+		return fmt.Errorf("gname: %w", err)
+	}
+
+	subDomain, err := dns01.ExtractSubDomain(info.EffectiveFQDN, authZone)
+	if err != nil {
+		return fmt.Errorf("gname: %w", err)
+	}
+
+	if err := d.removeDNSRecord(dns01.UnFqdn(authZone), subDomain); err != nil {
 		return fmt.Errorf("gname: %w", err)
 	}
 
@@ -112,12 +121,12 @@ func (d *DNSProvider) Timeout() (timeout, interval time.Duration) {
 	return d.config.PropagationTimeout, d.config.PollingInterval
 }
 
-func (d *DNSProvider) getDNSRecord(domain, subDomain string) (*gnamesdk.ResolutionRecord, error) {
-	page := 1
-	pageSize := 20
+func (d *DNSProvider) getDNSRecord(zoneName, subDomain string) (*gnamesdk.ResolutionRecord, error) {
+	page := int32(1)
+	pageSize := int32(20)
 	for {
 		request := &gnamesdk.ListDomainResolutionRequest{}
-		request.ZoneName = domain
+		request.ZoneName = zoneName
 		request.Page = &page
 		request.PageSize = &pageSize
 
@@ -145,40 +154,39 @@ func (d *DNSProvider) getDNSRecord(domain, subDomain string) (*gnamesdk.Resoluti
 	return nil, nil
 }
 
-func (d *DNSProvider) addOrUpdateDNSRecord(domain, subDomain, value string) error {
-	record, err := d.getDNSRecord(domain, subDomain)
+func (d *DNSProvider) addOrUpdateDNSRecord(zoneName, subDomain, value string) error {
+	record, err := d.getDNSRecord(zoneName, subDomain)
 	if err != nil {
 		return err
 	}
 
 	if record == nil {
 		request := &gnamesdk.AddDomainResolutionRequest{
-			ZoneName:    domain,
+			ZoneName:    zoneName,
 			RecordType:  "TXT",
 			RecordName:  subDomain,
 			RecordValue: value,
-			TTL:         d.config.TTL,
+			TTL:         int32(d.config.TTL),
 		}
 		_, err := d.client.AddDomainResolution(request)
 		return err
 	} else {
+		recordId, _ := record.ID.Int64()
 		request := &gnamesdk.ModifyDomainResolutionRequest{
-			ID:          record.ID,
-			ZoneName:    domain,
+			ID:          recordId,
+			ZoneName:    zoneName,
 			RecordType:  "TXT",
 			RecordName:  subDomain,
 			RecordValue: value,
-			TTL:         d.config.TTL,
+			TTL:         int32(d.config.TTL),
 		}
 		_, err := d.client.ModifyDomainResolution(request)
 		return err
 	}
-
-	return nil
 }
 
-func (d *DNSProvider) removeDNSRecord(domain, subDomain, value string) error {
-	record, err := d.getDNSRecord(domain, subDomain)
+func (d *DNSProvider) removeDNSRecord(zoneName, subDomain string) error {
+	record, err := d.getDNSRecord(zoneName, subDomain)
 	if err != nil {
 		return err
 	}
@@ -187,9 +195,10 @@ func (d *DNSProvider) removeDNSRecord(domain, subDomain, value string) error {
 		return nil
 	}
 
+	recordId, _ := record.ID.Int64()
 	request := &gnamesdk.DeleteDomainResolutionRequest{
-		ZoneName: domain,
-		RecordID: record.ID,
+		ZoneName: zoneName,
+		RecordID: recordId,
 	}
 	_, err = d.client.DeleteDomainResolution(request)
 	return err

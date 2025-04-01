@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 )
 
-type AliyunOSSDeployerConfig struct {
+type DeployerConfig struct {
 	// 阿里云 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 阿里云 AccessKeySecret。
@@ -25,25 +25,17 @@ type AliyunOSSDeployerConfig struct {
 	Domain string `json:"domain"`
 }
 
-type AliyunOSSDeployer struct {
-	config    *AliyunOSSDeployerConfig
-	logger    logger.Logger
+type DeployerProvider struct {
+	config    *DeployerConfig
+	logger    *slog.Logger
 	sdkClient *oss.Client
 }
 
-var _ deployer.Deployer = (*AliyunOSSDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *AliyunOSSDeployerConfig) (*AliyunOSSDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *AliyunOSSDeployerConfig, logger logger.Logger) (*AliyunOSSDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.AccessKeyId, config.AccessKeySecret, config.Region)
@@ -51,14 +43,23 @@ func NewWithLogger(config *AliyunOSSDeployerConfig, logger logger.Logger) (*Aliy
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &AliyunOSSDeployer{
-		logger:    logger,
+	return &DeployerProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (d *AliyunOSSDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	if d.config.Bucket == "" {
 		return nil, errors.New("config `bucket` is required")
 	}
@@ -68,14 +69,16 @@ func (d *AliyunOSSDeployer) Deploy(ctx context.Context, certPem string, privkeyP
 
 	// 为存储空间绑定自定义域名
 	// REF: https://help.aliyun.com/zh/oss/developer-reference/putcname
-	err := d.sdkClient.PutBucketCnameWithCertificate(d.config.Bucket, oss.PutBucketCname{
+	putBucketCnameWithCertificateReq := oss.PutBucketCname{
 		Cname: d.config.Domain,
 		CertificateConfiguration: &oss.CertificateConfiguration{
 			Certificate: certPem,
 			PrivateKey:  privkeyPem,
 			Force:       true,
 		},
-	})
+	}
+	err := d.sdkClient.PutBucketCnameWithCertificate(d.config.Bucket, putBucketCnameWithCertificateReq)
+	d.logger.Debug("sdk request 'oss.PutBucketCnameWithCertificate'", slog.Any("bucket", d.config.Bucket), slog.Any("request", putBucketCnameWithCertificateReq))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'oss.PutBucketCnameWithCertificate'")
 	}
@@ -84,7 +87,7 @@ func (d *AliyunOSSDeployer) Deploy(ctx context.Context, certPem string, privkeyP
 }
 
 func createSdkClient(accessKeyId, accessKeySecret, region string) (*oss.Client, error) {
-	// 接入点一览 https://help.aliyun.com/zh/oss/user-guide/regions-and-endpoints
+	// 接入点一览 https://api.aliyun.com/product/Oss
 	var endpoint string
 	switch region {
 	case "":

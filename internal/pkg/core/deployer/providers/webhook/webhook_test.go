@@ -48,9 +48,10 @@ func TestDeploy(t *testing.T) {
 			fmt.Sprintf("WEBHOOKDATA: %v", fWebhookData),
 		}, "\n"))
 
-		deployer, err := provider.New(&provider.WebhookDeployerConfig{
-			WebhookUrl:  fWebhookUrl,
-			WebhookData: fWebhookData,
+		deployer, err := provider.NewDeployer(&provider.DeployerConfig{
+			WebhookUrl:               fWebhookUrl,
+			WebhookData:              fWebhookData,
+			AllowInsecureConnections: true,
 		})
 		if err != nil {
 			t.Errorf("err: %+v", err)

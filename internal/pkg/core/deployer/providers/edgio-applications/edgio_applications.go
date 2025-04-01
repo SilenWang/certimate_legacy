@@ -2,18 +2,17 @@
 
 import (
 	"context"
-	"encoding/pem"
-	"errors"
+	"log/slog"
 
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 	edgsdk "github.com/usual2970/certimate/internal/pkg/vendors/edgio-sdk/applications/v7"
-	edgsdkDtos "github.com/usual2970/certimate/internal/pkg/vendors/edgio-sdk/applications/v7/dtos"
+	edgsdkdtos "github.com/usual2970/certimate/internal/pkg/vendors/edgio-sdk/applications/v7/dtos"
 )
 
-type EdgioApplicationsDeployerConfig struct {
+type DeployerConfig struct {
 	// Edgio ClientId。
 	ClientId string `json:"clientId"`
 	// Edgio ClientSecret。
@@ -22,25 +21,17 @@ type EdgioApplicationsDeployerConfig struct {
 	EnvironmentId string `json:"environmentId"`
 }
 
-type EdgioApplicationsDeployer struct {
-	config    *EdgioApplicationsDeployerConfig
-	logger    logger.Logger
+type DeployerProvider struct {
+	config    *DeployerConfig
+	logger    *slog.Logger
 	sdkClient *edgsdk.EdgioClient
 }
 
-var _ deployer.Deployer = (*EdgioApplicationsDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *EdgioApplicationsDeployerConfig) (*EdgioApplicationsDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *EdgioApplicationsDeployerConfig, logger logger.Logger) (*EdgioApplicationsDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.ClientId, config.ClientSecret)
@@ -48,31 +39,42 @@ func NewWithLogger(config *EdgioApplicationsDeployerConfig, logger logger.Logger
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &EdgioApplicationsDeployer{
-		logger:    logger,
+	return &DeployerProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (d *EdgioApplicationsDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 提取 Edgio 所需的服务端证书和中间证书内容
-	privateCertPem, intermediateCertPem := extractCertChains(certPem)
+	privateCertPem, intermediateCertPem, err := certutil.ExtractCertificatesFromPEM(certPem)
+	if err != nil {
+		return nil, err
+	}
 
 	// 上传 TLS 证书
 	// REF: https://docs.edg.io/rest_api/#tag/tls-certs/operation/postConfigV01TlsCerts
-	uploadTlsCertReq := edgsdkDtos.UploadTlsCertRequest{
+	uploadTlsCertReq := edgsdkdtos.UploadTlsCertRequest{
 		EnvironmentID:    d.config.EnvironmentId,
 		PrimaryCert:      privateCertPem,
 		IntermediateCert: intermediateCertPem,
 		PrivateKey:       privkeyPem,
 	}
 	uploadTlsCertResp, err := d.sdkClient.UploadTlsCert(uploadTlsCertReq)
+	d.logger.Debug("sdk request 'edgio.UploadTlsCert'", slog.Any("request", uploadTlsCertReq), slog.Any("response", uploadTlsCertResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'edgio.UploadTlsCert'")
 	}
-
-	d.logger.Logt("已上传 TLS 证书", uploadTlsCertResp)
 
 	return &deployer.DeployResult{}, nil
 }
@@ -80,33 +82,4 @@ func (d *EdgioApplicationsDeployer) Deploy(ctx context.Context, certPem string, 
 func createSdkClient(clientId, clientSecret string) (*edgsdk.EdgioClient, error) {
 	client := edgsdk.NewEdgioClient(clientId, clientSecret, "", "")
 	return client, nil
-}
-
-func extractCertChains(certPem string) (primaryCertPem string, intermediateCertPem string) {
-	pemBlocks := make([]*pem.Block, 0)
-	pemData := []byte(certPem)
-	for {
-		block, rest := pem.Decode(pemData)
-		if block == nil {
-			break
-		}
-
-		pemBlocks = append(pemBlocks, block)
-		pemData = rest
-	}
-
-	primaryCertPem = ""
-	intermediateCertPem = ""
-
-	if len(pemBlocks) > 0 {
-		primaryCertPem = string(pem.EncodeToMemory(pemBlocks[0]))
-	}
-
-	if len(pemBlocks) > 1 {
-		for i := 1; i < len(pemBlocks); i++ {
-			intermediateCertPem += string(pem.EncodeToMemory(pemBlocks[i]))
-		}
-	}
-
-	return primaryCertPem, intermediateCertPem
 }

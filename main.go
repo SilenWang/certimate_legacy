@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	_ "time/tzdata"
@@ -18,7 +18,8 @@ import (
 	"github.com/usual2970/certimate/internal/scheduler"
 	"github.com/usual2970/certimate/internal/workflow"
 	"github.com/usual2970/certimate/ui"
-	//_ "github.com/usual2970/certimate/migrations"
+
+	_ "github.com/usual2970/certimate/migrations"
 )
 
 func main() {
@@ -28,6 +29,11 @@ func main() {
 	var flagDir string
 	flag.StringVar(&flagHttp, "http", "127.0.0.1:8090", "HTTP server address")
 	flag.StringVar(&flagDir, "dir", "/pb_data/database", "Pocketbase data directory")
+	if len(os.Args) < 2 {
+		slog.Error("[CERTIMATE] missing exec args")
+		os.Exit(1)
+		return
+	}
 	_ = flag.CommandLine.Parse(os.Args[2:]) // skip the first two arguments: "main.go serve"
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
@@ -55,15 +61,13 @@ func main() {
 
 	app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
 		routes.Unregister()
-
-		log.Println("Exit!")
-
+		slog.Info("[CERTIMATE] Exit!")
 		return e.Next()
 	})
 
-	log.Printf("Visit the website: http://%s", flagHttp)
+	slog.Info("[CERTIMATE] Visit the website: http://" + flagHttp)
 
 	if err := app.Start(); err != nil {
-		log.Fatal(err)
+		slog.Error("[CERTIMATE] Start failed.", "err", err)
 	}
 }

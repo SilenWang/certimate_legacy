@@ -2,8 +2,9 @@ package webhook
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
-	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -11,52 +12,57 @@ import (
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 )
 
-type WebhookDeployerConfig struct {
+type DeployerConfig struct {
 	// Webhook URL。
 	WebhookUrl string `json:"webhookUrl"`
 	// Webhook 回调数据（JSON 格式）。
 	WebhookData string `json:"webhookData,omitempty"`
+	// 是否允许不安全的连接。
+	AllowInsecureConnections bool `json:"allowInsecureConnections,omitempty"`
 }
 
-type WebhookDeployer struct {
-	config     *WebhookDeployerConfig
-	logger     logger.Logger
+type DeployerProvider struct {
+	config     *DeployerConfig
+	logger     *slog.Logger
 	httpClient *resty.Client
 }
 
-var _ deployer.Deployer = (*WebhookDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *WebhookDeployerConfig) (*WebhookDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *WebhookDeployerConfig, logger logger.Logger) (*WebhookDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client := resty.New().
 		SetTimeout(30 * time.Second).
 		SetRetryCount(3).
 		SetRetryWaitTime(5 * time.Second)
+	if config.AllowInsecureConnections {
+		client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	}
 
-	return &WebhookDeployer{
+	return &DeployerProvider{
 		config:     config,
-		logger:     logger,
+		logger:     slog.Default(),
 		httpClient: client,
 	}, nil
 }
 
-func (d *WebhookDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
-	certX509, err := certs.ParseCertificateFromPEM(certPem)
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+	certX509, err := certutil.ParseCertificateFromPEM(certPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to parse x509")
 	}
@@ -84,18 +90,18 @@ func (d *WebhookDeployer) Deploy(ctx context.Context, certPem string, privkeyPem
 		return nil, xerrors.Errorf("unexpected webhook response status code: %d", resp.StatusCode())
 	}
 
-	d.logger.Logt("Webhook request sent", resp.String())
+	d.logger.Debug("webhook responded", slog.Any("response", resp.String()))
 
 	return &deployer.DeployResult{}, nil
 }
 
 func replaceJsonValueRecursively(data interface{}, oldStr, newStr string) interface{} {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for k, val := range v {
 			v[k] = replaceJsonValueRecursively(val, oldStr, newStr)
 		}
-	case []interface{}:
+	case []any:
 		for i, val := range v {
 			v[i] = replaceJsonValueRecursively(val, oldStr, newStr)
 		}

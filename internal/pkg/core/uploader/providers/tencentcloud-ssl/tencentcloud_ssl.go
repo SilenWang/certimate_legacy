@@ -2,57 +2,66 @@
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 
 	xerrors "github.com/pkg/errors"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
-	tcSsl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	tcssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
 )
 
-type TencentCloudSSLUploaderConfig struct {
+type UploaderConfig struct {
 	// 腾讯云 SecretId。
 	SecretId string `json:"secretId"`
 	// 腾讯云 SecretKey。
 	SecretKey string `json:"secretKey"`
 }
 
-type TencentCloudSSLUploader struct {
-	config    *TencentCloudSSLUploaderConfig
-	sdkClient *tcSsl.Client
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *tcssl.Client
 }
 
-var _ uploader.Uploader = (*TencentCloudSSLUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *TencentCloudSSLUploaderConfig) (*TencentCloudSSLUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	client, err := createSdkClient(
-		config.SecretId,
-		config.SecretKey,
-	)
+	client, err := createSdkClient(config.SecretId, config.SecretKey)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &TencentCloudSSLUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *TencentCloudSSLUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 上传新证书
 	// REF: https://cloud.tencent.com/document/product/400/41665
-	uploadCertificateReq := tcSsl.NewUploadCertificateRequest()
+	uploadCertificateReq := tcssl.NewUploadCertificateRequest()
 	uploadCertificateReq.CertificatePublicKey = common.StringPtr(certPem)
 	uploadCertificateReq.CertificatePrivateKey = common.StringPtr(privkeyPem)
 	uploadCertificateReq.Repeatable = common.BoolPtr(false)
 	uploadCertificateResp, err := u.sdkClient.UploadCertificate(uploadCertificateReq)
+	u.logger.Debug("sdk request 'ssl.UploadCertificate'", slog.Any("request", uploadCertificateReq), slog.Any("response", uploadCertificateResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'ssl.UploadCertificate'")
 	}
@@ -64,9 +73,9 @@ func (u *TencentCloudSSLUploader) Upload(ctx context.Context, certPem string, pr
 	}, nil
 }
 
-func createSdkClient(secretId, secretKey string) (*tcSsl.Client, error) {
+func createSdkClient(secretId, secretKey string) (*tcssl.Client, error) {
 	credential := common.NewCredential(secretId, secretKey)
-	client, err := tcSsl.NewClient(credential, "", profile.NewClientProfile())
+	client, err := tcssl.NewClient(credential, "", profile.NewClientProfile())
 	if err != nil {
 		return nil, err
 	}

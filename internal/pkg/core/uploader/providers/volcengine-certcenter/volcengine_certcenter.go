@@ -2,17 +2,17 @@ package volcenginecertcenter
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 
 	xerrors "github.com/pkg/errors"
 	ve "github.com/volcengine/volcengine-go-sdk/volcengine"
-	veSession "github.com/volcengine/volcengine-go-sdk/volcengine/session"
+	vesession "github.com/volcengine/volcengine-go-sdk/volcengine/session"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	vesdkCc "github.com/usual2970/certimate/internal/pkg/vendors/volcengine-sdk/certcenter"
+	veccsdk "github.com/usual2970/certimate/internal/pkg/vendors/volcengine-sdk/certcenter"
 )
 
-type VolcEngineCertCenterUploaderConfig struct {
+type UploaderConfig struct {
 	// 火山引擎 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 火山引擎 AccessKeySecret。
@@ -21,16 +21,17 @@ type VolcEngineCertCenterUploaderConfig struct {
 	Region string `json:"region"`
 }
 
-type VolcEngineCertCenterUploader struct {
-	config    *VolcEngineCertCenterUploaderConfig
-	sdkClient *vesdkCc.CertCenter
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *veccsdk.CertCenter
 }
 
-var _ uploader.Uploader = (*VolcEngineCertCenterUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *VolcEngineCertCenterUploaderConfig) (*VolcEngineCertCenterUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.AccessKeyId, config.AccessKeySecret, config.Region)
@@ -38,23 +39,34 @@ func New(config *VolcEngineCertCenterUploaderConfig) (*VolcEngineCertCenterUploa
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &VolcEngineCertCenterUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *VolcEngineCertCenterUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 上传证书
 	// REF: https://www.volcengine.com/docs/6638/1365580
-	importCertificateReq := &vesdkCc.ImportCertificateInput{
-		CertificateInfo: &vesdkCc.ImportCertificateInputCertificateInfo{
+	importCertificateReq := &veccsdk.ImportCertificateInput{
+		CertificateInfo: &veccsdk.ImportCertificateInputCertificateInfo{
 			CertificateChain: ve.String(certPem),
 			PrivateKey:       ve.String(privkeyPem),
 		},
 		Repeatable: ve.Bool(false),
 	}
 	importCertificateResp, err := u.sdkClient.ImportCertificate(importCertificateReq)
+	u.logger.Debug("sdk request 'certcenter.ImportCertificate'", slog.Any("request", importCertificateReq), slog.Any("response", importCertificateResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'certcenter.ImportCertificate'")
 	}
@@ -71,18 +83,18 @@ func (u *VolcEngineCertCenterUploader) Upload(ctx context.Context, certPem strin
 	}, nil
 }
 
-func createSdkClient(accessKeyId, accessKeySecret, region string) (*vesdkCc.CertCenter, error) {
+func createSdkClient(accessKeyId, accessKeySecret, region string) (*veccsdk.CertCenter, error) {
 	if region == "" {
 		region = "cn-beijing" // 证书中心默认区域：北京
 	}
 
 	config := ve.NewConfig().WithRegion(region).WithAkSk(accessKeyId, accessKeySecret)
 
-	session, err := veSession.NewSession(config)
+	session, err := vesession.NewSession(config)
 	if err != nil {
 		return nil, err
 	}
 
-	client := vesdkCc.New(session)
+	client := veccsdk.New(session)
 	return client, nil
 }

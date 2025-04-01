@@ -2,6 +2,7 @@ package nodeprocessor
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/usual2970/certimate/internal/domain"
 	"github.com/usual2970/certimate/internal/notify"
@@ -9,44 +10,45 @@ import (
 )
 
 type notifyNode struct {
-	node         *domain.WorkflowNode
+	node *domain.WorkflowNode
+	*nodeProcessor
+
 	settingsRepo settingsRepository
-	*nodeLogger
 }
 
 func NewNotifyNode(node *domain.WorkflowNode) *notifyNode {
 	return &notifyNode{
-		node:         node,
-		nodeLogger:   NewNodeLogger(node),
+		node:          node,
+		nodeProcessor: newNodeProcessor(node),
+
 		settingsRepo: repository.NewSettingsRepository(),
 	}
 }
 
-func (n *notifyNode) Run(ctx context.Context) error {
-	n.AddOutput(ctx, n.node.Name, "开始执行")
+func (n *notifyNode) Process(ctx context.Context) error {
+	n.logger.Info("ready to notify ...")
 
 	nodeConfig := n.node.GetConfigForNotify()
 
 	// 获取通知配置
 	settings, err := n.settingsRepo.GetByName(ctx, "notifyChannels")
 	if err != nil {
-		n.AddOutput(ctx, n.node.Name, "获取通知配置失败", err.Error())
 		return err
 	}
 
 	// 获取通知渠道
 	channelConfig, err := settings.GetNotifyChannelConfig(nodeConfig.Channel)
 	if err != nil {
-		n.AddOutput(ctx, n.node.Name, "获取通知渠道配置失败", err.Error())
 		return err
 	}
 
 	// 发送通知
 	if err := notify.SendToChannel(nodeConfig.Subject, nodeConfig.Message, nodeConfig.Channel, channelConfig); err != nil {
-		n.AddOutput(ctx, n.node.Name, "发送通知失败", err.Error())
+		n.logger.Warn("failed to notify", slog.String("channel", nodeConfig.Channel))
 		return err
 	}
-	n.AddOutput(ctx, n.node.Name, "发送通知成功")
+
+	n.logger.Info("notify completed")
 
 	return nil
 }

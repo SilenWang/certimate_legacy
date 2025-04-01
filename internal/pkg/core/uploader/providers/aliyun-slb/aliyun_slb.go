@@ -4,22 +4,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 
-	aliyunOpen "github.com/alibabacloud-go/darabonba-openapi/v2/client"
-	aliyunSlb "github.com/alibabacloud-go/slb-20140515/v4/client"
+	aliopen "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	alislb "github.com/alibabacloud-go/slb-20140515/v4/client"
 	"github.com/alibabacloud-go/tea/tea"
 	xerrors "github.com/pkg/errors"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
 )
 
-type AliyunSLBUploaderConfig struct {
+type UploaderConfig struct {
 	// 阿里云 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 阿里云 AccessKeySecret。
@@ -28,46 +28,54 @@ type AliyunSLBUploaderConfig struct {
 	Region string `json:"region"`
 }
 
-type AliyunSLBUploader struct {
-	config    *AliyunSLBUploaderConfig
-	sdkClient *aliyunSlb.Client
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *alislb.Client
 }
 
-var _ uploader.Uploader = (*AliyunSLBUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *AliyunSLBUploaderConfig) (*AliyunSLBUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	client, err := createSdkClient(
-		config.AccessKeyId,
-		config.AccessKeySecret,
-		config.Region,
-	)
+	client, err := createSdkClient(config.AccessKeyId, config.AccessKeySecret, config.Region)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &AliyunSLBUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *AliyunSLBUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 解析证书内容
-	certX509, err := certs.ParseCertificateFromPEM(certPem)
+	certX509, err := certutil.ParseCertificateFromPEM(certPem)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询证书列表，避免重复上传
 	// REF: https://help.aliyun.com/zh/slb/classic-load-balancer/developer-reference/api-slb-2014-05-15-describeservercertificates
-	describeServerCertificatesReq := &aliyunSlb.DescribeServerCertificatesRequest{
+	describeServerCertificatesReq := &alislb.DescribeServerCertificatesRequest{
 		RegionId: tea.String(u.config.Region),
 	}
 	describeServerCertificatesResp, err := u.sdkClient.DescribeServerCertificates(describeServerCertificatesReq)
+	u.logger.Debug("sdk request 'slb.DescribeServerCertificates'", slog.Any("request", describeServerCertificatesReq), slog.Any("response", describeServerCertificatesResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'slb.DescribeServerCertificates'")
 	}
@@ -79,8 +87,9 @@ func (u *AliyunSLBUploader) Upload(ctx context.Context, certPem string, privkeyP
 			isSameCert := *certDetail.IsAliCloudCertificate == 0 &&
 				strings.EqualFold(fingerprintHex, strings.ReplaceAll(*certDetail.Fingerprint, ":", "")) &&
 				strings.EqualFold(certX509.Subject.CommonName, *certDetail.CommonName)
-			// 如果已存在相同证书，直接返回已有的证书信息
+			// 如果已存在相同证书，直接返回
 			if isSameCert {
+				u.logger.Info("ssl certificate already exists")
 				return &uploader.UploadResult{
 					CertId:   *certDetail.ServerCertificateId,
 					CertName: *certDetail.ServerCertificateName,
@@ -101,13 +110,14 @@ func (u *AliyunSLBUploader) Upload(ctx context.Context, certPem string, privkeyP
 
 	// 上传新证书
 	// REF: https://help.aliyun.com/zh/slb/classic-load-balancer/developer-reference/api-slb-2014-05-15-uploadservercertificate
-	uploadServerCertificateReq := &aliyunSlb.UploadServerCertificateRequest{
+	uploadServerCertificateReq := &alislb.UploadServerCertificateRequest{
 		RegionId:              tea.String(u.config.Region),
 		ServerCertificateName: tea.String(certName),
 		ServerCertificate:     tea.String(certPem),
 		PrivateKey:            tea.String(privkeyPem),
 	}
 	uploadServerCertificateResp, err := u.sdkClient.UploadServerCertificate(uploadServerCertificateReq)
+	u.logger.Debug("sdk request 'slb.UploadServerCertificate'", slog.Any("request", uploadServerCertificateReq), slog.Any("response", uploadServerCertificateResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'slb.UploadServerCertificate'")
 	}
@@ -119,8 +129,8 @@ func (u *AliyunSLBUploader) Upload(ctx context.Context, certPem string, privkeyP
 	}, nil
 }
 
-func createSdkClient(accessKeyId, accessKeySecret, region string) (*aliyunSlb.Client, error) {
-	// 接入点一览 https://help.aliyun.com/zh/slb/classic-load-balancer/developer-reference/api-slb-2014-05-15-endpoint
+func createSdkClient(accessKeyId, accessKeySecret, region string) (*alislb.Client, error) {
+	// 接入点一览 https://api.aliyun.com/product/Slb
 	var endpoint string
 	switch region {
 	case
@@ -133,13 +143,13 @@ func createSdkClient(accessKeyId, accessKeySecret, region string) (*aliyunSlb.Cl
 		endpoint = fmt.Sprintf("slb.%s.aliyuncs.com", region)
 	}
 
-	config := &aliyunOpen.Config{
+	config := &aliopen.Config{
 		Endpoint:        tea.String(endpoint),
 		AccessKeyId:     tea.String(accessKeyId),
 		AccessKeySecret: tea.String(accessKeySecret),
 	}
 
-	client, err := aliyunSlb.NewClient(config)
+	client, err := alislb.NewClient(config)
 	if err != nil {
 		return nil, err
 	}

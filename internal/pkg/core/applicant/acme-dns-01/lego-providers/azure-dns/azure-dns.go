@@ -1,17 +1,15 @@
 package azuredns
 
 import (
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/azuredns"
+
+	azcommon "github.com/usual2970/certimate/internal/pkg/vendors/azure-sdk/common"
 )
 
-type AzureDNSApplicantConfig struct {
+type ChallengeProviderConfig struct {
 	TenantId              string `json:"tenantId"`
 	ClientId              string `json:"clientId"`
 	ClientSecret          string `json:"clientSecret"`
@@ -20,9 +18,9 @@ type AzureDNSApplicantConfig struct {
 	DnsTTL                int32  `json:"dnsTTL,omitempty"`
 }
 
-func NewChallengeProvider(config *AzureDNSApplicantConfig) (challenge.Provider, error) {
+func NewChallengeProvider(config *ChallengeProviderConfig) (challenge.Provider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
 	providerConfig := azuredns.NewDefaultConfig()
@@ -30,16 +28,11 @@ func NewChallengeProvider(config *AzureDNSApplicantConfig) (challenge.Provider, 
 	providerConfig.ClientID = config.ClientId
 	providerConfig.ClientSecret = config.ClientSecret
 	if config.CloudName != "" {
-		switch strings.ToLower(config.CloudName) {
-		case "default", "public", "cloud", "azurecloud":
-			providerConfig.Environment = cloud.AzurePublic
-		case "usgovernment", "azureusgovernment":
-			providerConfig.Environment = cloud.AzureGovernment
-		case "china", "chinacloud", "azurechina", "azurechinacloud":
-			providerConfig.Environment = cloud.AzureChina
-		default:
-			return nil, fmt.Errorf("azuredns: unknown environment %s", config.CloudName)
+		env, err := azcommon.GetCloudEnvironmentConfiguration(config.CloudName)
+		if err != nil {
+			return nil, err
 		}
+		providerConfig.Environment = env
 	}
 	if config.DnsPropagationTimeout != 0 {
 		providerConfig.PropagationTimeout = time.Duration(config.DnsPropagationTimeout) * time.Second

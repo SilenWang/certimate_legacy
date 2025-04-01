@@ -40,11 +40,11 @@ const UploadNodeConfigForm = forwardRef<UploadNodeConfigFormInstance, UploadNode
       certificate: z
         .string({ message: t("workflow_node.upload.form.certificate.placeholder") })
         .min(1, t("workflow_node.upload.form.certificate.placeholder"))
-        .max(5120, t("common.errmsg.string_max", { max: 5120 })),
+        .max(20480, t("common.errmsg.string_max", { max: 20480 })),
       privateKey: z
         .string({ message: t("workflow_node.upload.form.private_key.placeholder") })
         .min(1, t("workflow_node.upload.form.private_key.placeholder"))
-        .max(5120, t("common.errmsg.string_max", { max: 5120 })),
+        .max(20480, t("common.errmsg.string_max", { max: 20480 })),
     });
     const formRule = createSchemaFieldRule(formSchema);
     const { form: formInst, formProps } = useAntdForm({
@@ -137,11 +137,11 @@ const UploadNodeConfigForm = forwardRef<UploadNodeConfigFormInstance, UploadNode
     return (
       <Form className={className} style={style} {...formProps} disabled={disabled} layout="vertical" scrollToFirstError onValuesChange={handleFormChange}>
         <Form.Item name="domains" label={t("workflow_node.upload.form.domains.label")} rules={[formRule]}>
-          <Input placeholder={t("workflow_node.upload.form.domains.placeholder")} readOnly />
+          <Input variant="filled" placeholder={t("workflow_node.upload.form.domains.placeholder")} readOnly />
         </Form.Item>
 
         <Form.Item name="certificate" label={t("workflow_node.upload.form.certificate.label")} rules={[formRule]}>
-          <Input.TextArea readOnly autoSize={{ minRows: 5, maxRows: 10 }} placeholder={t("workflow_node.upload.form.certificate.placeholder")} />
+          <Input.TextArea readOnly autoSize={{ minRows: 5, maxRows: 5 }} placeholder={t("workflow_node.upload.form.certificate.placeholder")} />
         </Form.Item>
 
         <Form.Item>
@@ -151,7 +151,7 @@ const UploadNodeConfigForm = forwardRef<UploadNodeConfigFormInstance, UploadNode
         </Form.Item>
 
         <Form.Item name="privateKey" label={t("workflow_node.upload.form.private_key.label")} rules={[formRule]}>
-          <Input.TextArea readOnly autoSize={{ minRows: 5, maxRows: 10 }} placeholder={t("workflow_node.upload.form.private_key.placeholder")} />
+          <Input.TextArea readOnly autoSize={{ minRows: 5, maxRows: 5 }} placeholder={t("workflow_node.upload.form.private_key.placeholder")} />
         </Form.Item>
 
         <Form.Item>

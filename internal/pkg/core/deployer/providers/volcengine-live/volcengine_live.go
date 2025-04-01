@@ -3,20 +3,19 @@
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"strings"
 
 	xerrors "github.com/pkg/errors"
-	veLive "github.com/volcengine/volc-sdk-golang/service/live/v20230101"
+	velive "github.com/volcengine/volc-sdk-golang/service/live/v20230101"
 	ve "github.com/volcengine/volcengine-go-sdk/volcengine"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	uploaderp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/volcengine-live"
+	uploadersp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/volcengine-live"
 )
 
-type VolcEngineLiveDeployerConfig struct {
+type DeployerConfig struct {
 	// 火山引擎 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 火山引擎 AccessKeySecret。
@@ -25,33 +24,25 @@ type VolcEngineLiveDeployerConfig struct {
 	Domain string `json:"domain"`
 }
 
-type VolcEngineLiveDeployer struct {
-	config      *VolcEngineLiveDeployerConfig
-	logger      logger.Logger
-	sdkClient   *veLive.Live
+type DeployerProvider struct {
+	config      *DeployerConfig
+	logger      *slog.Logger
+	sdkClient   *velive.Live
 	sslUploader uploader.Uploader
 }
 
-var _ deployer.Deployer = (*VolcEngineLiveDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *VolcEngineLiveDeployerConfig) (*VolcEngineLiveDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *VolcEngineLiveDeployerConfig, logger logger.Logger) (*VolcEngineLiveDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	if logger == nil {
-		return nil, errors.New("logger is nil")
-	}
-
-	client := veLive.NewInstance()
+	client := velive.NewInstance()
 	client.SetAccessKey(config.AccessKeyId)
 	client.SetSecretKey(config.AccessKeySecret)
 
-	uploader, err := uploaderp.New(&uploaderp.VolcEngineLiveUploaderConfig{
+	uploader, err := uploadersp.NewUploader(&uploadersp.UploaderConfig{
 		AccessKeyId:     config.AccessKeyId,
 		AccessKeySecret: config.AccessKeySecret,
 	})
@@ -59,22 +50,32 @@ func NewWithLogger(config *VolcEngineLiveDeployerConfig, logger logger.Logger) (
 		return nil, xerrors.Wrap(err, "failed to create ssl uploader")
 	}
 
-	return &VolcEngineLiveDeployer{
-		logger:      logger,
+	return &DeployerProvider{
 		config:      config,
+		logger:      slog.Default(),
 		sdkClient:   client,
 		sslUploader: uploader,
 	}, nil
 }
 
-func (d *VolcEngineLiveDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	d.sslUploader.WithLogger(logger)
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 上传证书到 Live
 	upres, err := d.sslUploader.Upload(ctx, certPem, privkeyPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to upload certificate file")
+	} else {
+		d.logger.Info("ssl certificate uploaded", slog.Any("result", upres))
 	}
-
-	d.logger.Logt("certificate file uploaded", upres)
 
 	domains := make([]string, 0)
 	if strings.HasPrefix(d.config.Domain, "*.") {
@@ -84,11 +85,12 @@ func (d *VolcEngineLiveDeployer) Deploy(ctx context.Context, certPem string, pri
 		for {
 			// 查询域名列表
 			// REF: https://www.volcengine.com/docs/6469/1186277#%E6%9F%A5%E8%AF%A2%E5%9F%9F%E5%90%8D%E5%88%97%E8%A1%A8
-			listDomainDetailReq := &veLive.ListDomainDetailBody{
+			listDomainDetailReq := &velive.ListDomainDetailBody{
 				PageNum:  listDomainDetailPageNum,
 				PageSize: listDomainDetailPageSize,
 			}
 			listDomainDetailResp, err := d.sdkClient.ListDomainDetail(ctx, listDomainDetailReq)
+			d.logger.Debug("sdk request 'live.ListDomainDetail'", slog.Any("request", listDomainDetailReq), slog.Any("response", listDomainDetailResp))
 			if err != nil {
 				return nil, xerrors.Wrap(err, "failed to execute sdk request 'live.ListDomainDetail'")
 			}
@@ -113,7 +115,7 @@ func (d *VolcEngineLiveDeployer) Deploy(ctx context.Context, certPem string, pri
 		}
 
 		if len(domains) == 0 {
-			return nil, xerrors.Errorf("未查询到匹配的域名: %s", d.config.Domain)
+			return nil, errors.New("domain not found")
 		}
 	} else {
 		domains = append(domains, d.config.Domain)
@@ -125,16 +127,15 @@ func (d *VolcEngineLiveDeployer) Deploy(ctx context.Context, certPem string, pri
 		for _, domain := range domains {
 			// 绑定证书
 			// REF: https://www.volcengine.com/docs/6469/1186278#%E7%BB%91%E5%AE%9A%E8%AF%81%E4%B9%A6
-			bindCertReq := &veLive.BindCertBody{
+			bindCertReq := &velive.BindCertBody{
 				ChainID: upres.CertId,
 				Domain:  domain,
 				HTTPS:   ve.Bool(true),
 			}
 			bindCertResp, err := d.sdkClient.BindCert(ctx, bindCertReq)
+			d.logger.Debug("sdk request 'live.BindCert'", slog.Any("request", bindCertReq), slog.Any("response", bindCertResp))
 			if err != nil {
 				errs = append(errs, err)
-			} else {
-				d.logger.Logt(fmt.Sprintf("已绑定证书到域名 %s", domain), bindCertResp)
 			}
 		}
 

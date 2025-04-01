@@ -46,7 +46,7 @@ Shell command to run this test:
 	--CERTIMATE_DEPLOYER_ALIYUNCLB_REGION="cn-hangzhou" \
 	--CERTIMATE_DEPLOYER_ALIYUNCLB_LOADBALANCERID="your-clb-instance-id" \
 	--CERTIMATE_DEPLOYER_ALIYUNCLB_LISTENERPORT=443 \
-	--CERTIMATE_DEPLOYER_ALIYUNCLB_DOMAIN="your-alb-sni-domain"
+	--CERTIMATE_DEPLOYER_ALIYUNCLB_DOMAIN="your-clb-sni-domain"
 */
 func TestDeploy(t *testing.T) {
 	flag.Parse()
@@ -63,11 +63,11 @@ func TestDeploy(t *testing.T) {
 			fmt.Sprintf("DOMAIN: %v", fDomain),
 		}, "\n"))
 
-		deployer, err := provider.New(&provider.AliyunCLBDeployerConfig{
+		deployer, err := provider.NewDeployer(&provider.DeployerConfig{
 			AccessKeyId:     fAccessKeyId,
 			AccessKeySecret: fAccessKeySecret,
 			Region:          fRegion,
-			ResourceType:    provider.DEPLOY_RESOURCE_LOADBALANCER,
+			ResourceType:    provider.RESOURCE_TYPE_LOADBALANCER,
 			LoadbalancerId:  fLoadbalancerId,
 			Domain:          fDomain,
 		})
@@ -99,11 +99,11 @@ func TestDeploy(t *testing.T) {
 			fmt.Sprintf("LISTENERPORT: %v", fListenerPort),
 		}, "\n"))
 
-		deployer, err := provider.New(&provider.AliyunCLBDeployerConfig{
+		deployer, err := provider.NewDeployer(&provider.DeployerConfig{
 			AccessKeyId:     fAccessKeyId,
 			AccessKeySecret: fAccessKeySecret,
 			Region:          fRegion,
-			ResourceType:    provider.DEPLOY_RESOURCE_LISTENER,
+			ResourceType:    provider.RESOURCE_TYPE_LISTENER,
 			LoadbalancerId:  fLoadbalancerId,
 			ListenerPort:    int32(fListenerPort),
 			Domain:          fDomain,

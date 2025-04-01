@@ -1,4 +1,4 @@
-name: basebuild
+name: Base Build
 
 on:
   push:

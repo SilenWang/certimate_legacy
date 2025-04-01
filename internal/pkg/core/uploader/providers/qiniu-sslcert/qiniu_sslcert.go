@@ -4,52 +4,61 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	xerrors "github.com/pkg/errors"
 	"github.com/qiniu/go-sdk/v7/auth"
 
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	"github.com/usual2970/certimate/internal/pkg/utils/certs"
-	qiniuEx "github.com/usual2970/certimate/internal/pkg/vendors/qiniu-sdk"
+	"github.com/usual2970/certimate/internal/pkg/utils/certutil"
+	qiniusdk "github.com/usual2970/certimate/internal/pkg/vendors/qiniu-sdk"
 )
 
-type QiniuSSLCertUploaderConfig struct {
+type UploaderConfig struct {
 	// 七牛云 AccessKey。
 	AccessKey string `json:"accessKey"`
 	// 七牛云 SecretKey。
 	SecretKey string `json:"secretKey"`
 }
 
-type QiniuSSLCertUploader struct {
-	config    *QiniuSSLCertUploaderConfig
-	sdkClient *qiniuEx.Client
+type UploaderProvider struct {
+	config    *UploaderConfig
+	logger    *slog.Logger
+	sdkClient *qiniusdk.Client
 }
 
-var _ uploader.Uploader = (*QiniuSSLCertUploader)(nil)
+var _ uploader.Uploader = (*UploaderProvider)(nil)
 
-func New(config *QiniuSSLCertUploaderConfig) (*QiniuSSLCertUploader, error) {
+func NewUploader(config *UploaderConfig) (*UploaderProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
+		panic("config is nil")
 	}
 
-	client, err := createSdkClient(
-		config.AccessKey,
-		config.SecretKey,
-	)
+	client, err := createSdkClient(config.AccessKey, config.SecretKey)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	return &QiniuSSLCertUploader{
+	return &UploaderProvider{
 		config:    config,
+		logger:    slog.Default(),
 		sdkClient: client,
 	}, nil
 }
 
-func (u *QiniuSSLCertUploader) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
+func (u *UploaderProvider) WithLogger(logger *slog.Logger) uploader.Uploader {
+	if logger == nil {
+		u.logger = slog.Default()
+	} else {
+		u.logger = logger
+	}
+	return u
+}
+
+func (u *UploaderProvider) Upload(ctx context.Context, certPem string, privkeyPem string) (res *uploader.UploadResult, err error) {
 	// 解析证书内容
-	certX509, err := certs.ParseCertificateFromPEM(certPem)
+	certX509, err := certutil.ParseCertificateFromPEM(certPem)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +69,8 @@ func (u *QiniuSSLCertUploader) Upload(ctx context.Context, certPem string, privk
 
 	// 上传新证书
 	// REF: https://developer.qiniu.com/fusion/8593/interface-related-certificate
-	uploadSslCertResp, err := u.sdkClient.UploadSslCert(certName, certX509.Subject.CommonName, certPem, privkeyPem)
+	uploadSslCertResp, err := u.sdkClient.UploadSslCert(context.TODO(), certName, certX509.Subject.CommonName, certPem, privkeyPem)
+	u.logger.Debug("sdk request 'cdn.UploadSslCert'", slog.Any("response", uploadSslCertResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'cdn.UploadSslCert'")
 	}
@@ -72,8 +82,16 @@ func (u *QiniuSSLCertUploader) Upload(ctx context.Context, certPem string, privk
 	}, nil
 }
 
-func createSdkClient(accessKey, secretKey string) (*qiniuEx.Client, error) {
+func createSdkClient(accessKey, secretKey string) (*qiniusdk.Client, error) {
+	if secretKey == "" {
+		return nil, errors.New("invalid qiniu access key")
+	}
+
+	if secretKey == "" {
+		return nil, errors.New("invalid qiniu secret key")
+	}
+
 	credential := auth.New(accessKey, secretKey)
-	client := qiniuEx.NewClient(credential)
+	client := qiniusdk.NewClient(credential)
 	return client, nil
 }

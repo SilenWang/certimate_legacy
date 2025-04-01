@@ -2,20 +2,34 @@ package nodeprocessor
 
 import (
 	"context"
-	"errors"
-	"time"
+	"fmt"
+	"io"
+	"log/slog"
 
 	"github.com/usual2970/certimate/internal/domain"
 )
 
 type NodeProcessor interface {
-	Run(ctx context.Context) error
-	Log(ctx context.Context) *domain.WorkflowRunLog
-	AddOutput(ctx context.Context, title, content string, err ...string)
+	GetLogger() *slog.Logger
+	SetLogger(*slog.Logger)
+
+	Process(ctx context.Context) error
 }
 
-type nodeLogger struct {
-	log *domain.WorkflowRunLog
+type nodeProcessor struct {
+	logger *slog.Logger
+}
+
+func (n *nodeProcessor) GetLogger() *slog.Logger {
+	return n.logger
+}
+
+func (n *nodeProcessor) SetLogger(logger *slog.Logger) {
+	if logger == nil {
+		panic("logger is nil")
+	}
+
+	n.logger = logger
 }
 
 type certificateRepository interface {
@@ -23,39 +37,19 @@ type certificateRepository interface {
 }
 
 type workflowOutputRepository interface {
-	GetByNodeId(ctx context.Context, nodeId string) (*domain.WorkflowOutput, error)
-	Save(ctx context.Context, output *domain.WorkflowOutput, certificate *domain.Certificate, cb func(id string) error) error
+	GetByNodeId(ctx context.Context, workflowNodeId string) (*domain.WorkflowOutput, error)
+	Save(ctx context.Context, workflowOutput *domain.WorkflowOutput) (*domain.WorkflowOutput, error)
+	SaveWithCertificate(ctx context.Context, workflowOutput *domain.WorkflowOutput, certificate *domain.Certificate) (*domain.WorkflowOutput, error)
 }
 
 type settingsRepository interface {
 	GetByName(ctx context.Context, name string) (*domain.Settings, error)
 }
 
-func NewNodeLogger(node *domain.WorkflowNode) *nodeLogger {
-	return &nodeLogger{
-		log: &domain.WorkflowRunLog{
-			NodeId:   node.Id,
-			NodeName: node.Name,
-			Outputs:  make([]domain.WorkflowRunLogOutput, 0),
-		},
+func newNodeProcessor(node *domain.WorkflowNode) *nodeProcessor {
+	return &nodeProcessor{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-}
-
-func (l *nodeLogger) Log(ctx context.Context) *domain.WorkflowRunLog {
-	return l.log
-}
-
-func (l *nodeLogger) AddOutput(ctx context.Context, title, content string, err ...string) {
-	output := domain.WorkflowRunLogOutput{
-		Time:    time.Now().UTC().Format(time.RFC3339),
-		Title:   title,
-		Content: content,
-	}
-	if len(err) > 0 {
-		output.Error = err[0]
-		l.log.Error = err[0]
-	}
-	l.log.Outputs = append(l.log.Outputs, output)
 }
 
 func GetProcessor(node *domain.WorkflowNode) (NodeProcessor, error) {
@@ -77,9 +71,14 @@ func GetProcessor(node *domain.WorkflowNode) (NodeProcessor, error) {
 	case domain.WorkflowNodeTypeExecuteFailure:
 		return NewExecuteFailureNode(node), nil
 	}
-	return nil, errors.New("not implemented")
+
+	return nil, fmt.Errorf("supported node type: %s", string(node.Type))
 }
 
 func getContextWorkflowId(ctx context.Context) string {
 	return ctx.Value("workflow_id").(string)
+}
+
+func getContextWorkflowRunId(ctx context.Context) string {
+	return ctx.Value("workflow_run_id").(string)
 }

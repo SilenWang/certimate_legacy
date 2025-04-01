@@ -2,21 +2,20 @@
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 	"strings"
 
 	xerrors "github.com/pkg/errors"
-	veDcdn "github.com/volcengine/volcengine-go-sdk/service/dcdn"
+	vedcdn "github.com/volcengine/volcengine-go-sdk/service/dcdn"
 	ve "github.com/volcengine/volcengine-go-sdk/volcengine"
-	veSession "github.com/volcengine/volcengine-go-sdk/volcengine/session"
+	vesession "github.com/volcengine/volcengine-go-sdk/volcengine/session"
 
 	"github.com/usual2970/certimate/internal/pkg/core/deployer"
-	"github.com/usual2970/certimate/internal/pkg/core/logger"
 	"github.com/usual2970/certimate/internal/pkg/core/uploader"
-	uploaderp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/volcengine-certcenter"
+	uploadersp "github.com/usual2970/certimate/internal/pkg/core/uploader/providers/volcengine-certcenter"
 )
 
-type VolcEngineDCDNDeployerConfig struct {
+type DeployerConfig struct {
 	// 火山引擎 AccessKeyId。
 	AccessKeyId string `json:"accessKeyId"`
 	// 火山引擎 AccessKeySecret。
@@ -27,26 +26,18 @@ type VolcEngineDCDNDeployerConfig struct {
 	Domain string `json:"domain"`
 }
 
-type VolcEngineDCDNDeployer struct {
-	config      *VolcEngineDCDNDeployerConfig
-	logger      logger.Logger
-	sdkClient   *veDcdn.DCDN
+type DeployerProvider struct {
+	config      *DeployerConfig
+	logger      *slog.Logger
+	sdkClient   *vedcdn.DCDN
 	sslUploader uploader.Uploader
 }
 
-var _ deployer.Deployer = (*VolcEngineDCDNDeployer)(nil)
+var _ deployer.Deployer = (*DeployerProvider)(nil)
 
-func New(config *VolcEngineDCDNDeployerConfig) (*VolcEngineDCDNDeployer, error) {
-	return NewWithLogger(config, logger.NewNilLogger())
-}
-
-func NewWithLogger(config *VolcEngineDCDNDeployerConfig, logger logger.Logger) (*VolcEngineDCDNDeployer, error) {
+func NewDeployer(config *DeployerConfig) (*DeployerProvider, error) {
 	if config == nil {
-		return nil, errors.New("config is nil")
-	}
-
-	if logger == nil {
-		return nil, errors.New("logger is nil")
+		panic("config is nil")
 	}
 
 	client, err := createSdkClient(config.AccessKeyId, config.AccessKeySecret, config.Region)
@@ -54,7 +45,7 @@ func NewWithLogger(config *VolcEngineDCDNDeployerConfig, logger logger.Logger) (
 		return nil, xerrors.Wrap(err, "failed to create sdk client")
 	}
 
-	uploader, err := uploaderp.New(&uploaderp.VolcEngineCertCenterUploaderConfig{
+	uploader, err := uploadersp.NewUploader(&uploadersp.UploaderConfig{
 		AccessKeyId:     config.AccessKeyId,
 		AccessKeySecret: config.AccessKeySecret,
 		Region:          config.Region,
@@ -63,55 +54,64 @@ func NewWithLogger(config *VolcEngineDCDNDeployerConfig, logger logger.Logger) (
 		return nil, xerrors.Wrap(err, "failed to create ssl uploader")
 	}
 
-	return &VolcEngineDCDNDeployer{
-		logger:      logger,
+	return &DeployerProvider{
 		config:      config,
+		logger:      slog.Default(),
 		sdkClient:   client,
 		sslUploader: uploader,
 	}, nil
 }
 
-func (d *VolcEngineDCDNDeployer) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
+func (d *DeployerProvider) WithLogger(logger *slog.Logger) deployer.Deployer {
+	if logger == nil {
+		d.logger = slog.Default()
+	} else {
+		d.logger = logger
+	}
+	d.sslUploader.WithLogger(logger)
+	return d
+}
+
+func (d *DeployerProvider) Deploy(ctx context.Context, certPem string, privkeyPem string) (*deployer.DeployResult, error) {
 	// 上传证书到证书中心
 	upres, err := d.sslUploader.Upload(ctx, certPem, privkeyPem)
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to upload certificate file")
+	} else {
+		d.logger.Info("ssl certificate uploaded", slog.Any("result", upres))
 	}
-
-	d.logger.Logt("certificate file uploaded", upres)
 
 	// "*.example.com" → ".example.com"，适配火山引擎 DCDN 要求的泛域名格式
 	domain := strings.TrimPrefix(d.config.Domain, "*")
 
 	// 绑定证书
 	// REF: https://www.volcengine.com/docs/6559/1250189
-	createCertBindReq := &veDcdn.CreateCertBindInput{
+	createCertBindReq := &vedcdn.CreateCertBindInput{
 		CertSource:  ve.String("volc"),
 		CertId:      ve.String(upres.CertId),
 		DomainNames: ve.StringSlice([]string{domain}),
 	}
 	createCertBindResp, err := d.sdkClient.CreateCertBind(createCertBindReq)
+	d.logger.Debug("sdk request 'dcdn.CreateCertBind'", slog.Any("request", createCertBindReq), slog.Any("response", createCertBindResp))
 	if err != nil {
 		return nil, xerrors.Wrap(err, "failed to execute sdk request 'dcdn.CreateCertBind'")
-	} else {
-		d.logger.Logt("已绑定证书", createCertBindResp)
 	}
 
 	return &deployer.DeployResult{}, nil
 }
 
-func createSdkClient(accessKeyId, accessKeySecret, region string) (*veDcdn.DCDN, error) {
+func createSdkClient(accessKeyId, accessKeySecret, region string) (*vedcdn.DCDN, error) {
 	if region == "" {
 		region = "cn-beijing" // DCDN 服务默认区域：北京
 	}
 
 	config := ve.NewConfig().WithRegion(region).WithAkSk(accessKeyId, accessKeySecret)
 
-	session, err := veSession.NewSession(config)
+	session, err := vesession.NewSession(config)
 	if err != nil {
 		return nil, err
 	}
 
-	client := veDcdn.New(session)
+	client := vedcdn.New(session)
 	return client, nil
 }
