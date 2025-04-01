@@ -51,7 +51,7 @@ jobs:
           generateReleaseNotes: true  #自动生成发行说明。
           owner: "SilenWang"
           repo: "certimate_win7"
-          artifacts: '${{ github.workspace }}/build/*'
+          artifacts: '${{ github.workspace }}/build/*windows*'
           tag: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
           body: ${{ steps.tag_version.outputs.changelog }}
